@@ -9,7 +9,6 @@ import {
   ZoomIn,
   ZoomOut,
   RotateCcw,
-  Scan,
   ShieldCheck,
   Grid,
   Loader2,
@@ -239,7 +238,7 @@ export const MapDetectionWorkspace: React.FC = () => {
 
             {detectedBoxes.length > 0 && (
               <div className="flex flex-col gap-1.5 max-h-44 overflow-y-auto">
-                {detectedBoxes.map((box, idx) => (
+                {detectedBoxes.map((_, idx) => (
                   <button
                     key={idx}
                     type="button"

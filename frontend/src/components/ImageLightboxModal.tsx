@@ -1,5 +1,5 @@
 import React from 'react';
-import { X, ZoomIn, ZoomOut, RotateCcw, Calendar, Layers, Download } from 'lucide-react';
+import { X, ZoomIn, ZoomOut, RotateCcw, Calendar, Layers } from 'lucide-react';
 
 interface ImageLightboxModalProps {
   isOpen: boolean;

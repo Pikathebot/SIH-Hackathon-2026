@@ -39,9 +39,18 @@ def _get_model():
             "RSUNIVLM_CHECKPOINT_PATH",
             os.path.join(os.path.dirname(__file__), "checkpoints", "RSUniVLM"),
         )
+        if not os.path.exists(checkpoint_path):
+            default_ckpt = os.path.join(os.path.dirname(__file__), "checkpoints", "RSUniVLM")
+            if os.path.exists(default_ckpt):
+                checkpoint_path = default_ckpt
+
         lora_path = os.environ.get("RSUNIVLM_LORA_ADAPTER_PATH")
         if lora_path and not os.path.exists(lora_path):
-            lora_path = None
+            default_lora = os.path.join(os.path.dirname(__file__), "checkpoints", "lora_adapter")
+            if os.path.exists(default_lora):
+                lora_path = default_lora
+            else:
+                lora_path = None
 
         _TOKENIZER, _MODEL, _IMAGE_PROCESSOR = load_rsunivlm_model(
             checkpoint_path=checkpoint_path,

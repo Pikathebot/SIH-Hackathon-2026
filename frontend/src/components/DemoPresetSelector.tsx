@@ -3,12 +3,7 @@ import { QueryImage, TaskType } from '../types/contract';
 import { 
   X, 
   ArrowRight,
-  Sparkles,
-  HelpCircle,
-  Layers,
-  Scan,
-  GitCompare,
-  Eye
+  Sparkles
 } from 'lucide-react';
 
 export interface DemoPreset {

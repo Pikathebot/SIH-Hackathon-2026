@@ -1,7 +1,7 @@
 # --------------------------------------------------------------------------
 # SatQuery AI — Backend Dockerfile
 # --------------------------------------------------------------------------
-# Build:  docker build -t satquery-backend ./backend
+# Build:  docker build -t satquery-backend -f backend/Dockerfile .
 # Run:    docker run -p 8000:8000 -v ./backend/data:/app/backend/data satquery-backend
 # --------------------------------------------------------------------------
 
@@ -28,8 +28,10 @@ COPY backend/ ./backend/
 # Ensure data directories exist
 RUN mkdir -p backend/data/images
 
+ENV PYTHONPATH="/app:/app/backend"
+
 # Expose the backend port
 EXPOSE 8000
 
 # Run the server
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "app.main:app", "--app-dir", "backend", "--host", "0.0.0.0", "--port", "8000"]
