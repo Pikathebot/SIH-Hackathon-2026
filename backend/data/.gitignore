@@ -1,0 +1,3 @@
+*.db
+images/*
+!images/.gitkeep
