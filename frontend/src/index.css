@@ -1,0 +1,176 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /* Dark Mode: Engineering Console */
+  :root, html.dark {
+    --color-bg: #0C1321;
+    --color-surface-panel: #121B2E;
+    --color-surface-container: #19202E;
+    --color-surface-variant: #2E3544;
+    --color-grid-hairline: #24314A;
+    
+    --color-primary: #FFCA85;
+    --color-primary-container: #F2A93B;
+    --color-on-primary: #452B00;
+    --color-on-primary-container: #664000;
+    
+    --color-text-primary: #EDF1F7;
+    --color-text-muted: #8B97AC;
+
+    --tick-color: #F2A93B;
+    --ruler-color: #24314A;
+  }
+
+  /* Light Mode: Research Workspace */
+  html.light {
+    --color-bg: #F8FAFC;
+    --color-surface-panel: #FFFFFF;
+    --color-surface-container: #F1F5F9;
+    --color-surface-variant: #CBD5E1;
+    --color-grid-hairline: #CBD5E1;
+    
+    --color-primary: #E85C4A;
+    --color-primary-container: #F2A93B;
+    --color-on-primary: #FFFFFF;
+    --color-on-primary-container: #452B00;
+    
+    --color-text-primary: #1E293B;
+    --color-text-muted: #64748B;
+
+    --tick-color: #E85C4A;
+    --ruler-color: #CBD5E1;
+  }
+
+  body {
+    background-color: var(--color-bg);
+    color: var(--color-text-primary);
+    font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  }
+}
+
+/* Coordinate-Tick Frame Signature Elements */
+.tick-frame {
+  position: relative;
+  border: 1px solid var(--color-grid-hairline);
+}
+
+/* Top-Left Corner Marks */
+.tick-frame::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 8px;
+  height: 2px;
+  background-color: var(--tick-color);
+  z-index: 20;
+}
+.tick-frame::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 2px;
+  height: 8px;
+  background-color: var(--tick-color);
+  z-index: 20;
+}
+
+/* Top-Right Corner Marks */
+.tick-frame-corners .corner-tr-h {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 8px;
+  height: 2px;
+  background-color: var(--tick-color);
+  z-index: 20;
+}
+.tick-frame-corners .corner-tr-v {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 2px;
+  height: 8px;
+  background-color: var(--tick-color);
+  z-index: 20;
+}
+
+/* Bottom-Left Corner Marks */
+.tick-frame-corners .corner-bl-h {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 8px;
+  height: 2px;
+  background-color: var(--tick-color);
+  z-index: 20;
+}
+.tick-frame-corners .corner-bl-v {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 2px;
+  height: 8px;
+  background-color: var(--tick-color);
+  z-index: 20;
+}
+
+/* Bottom-Right Corner Marks */
+.tick-frame-corners .corner-br-h {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 8px;
+  height: 2px;
+  background-color: var(--tick-color);
+  z-index: 20;
+}
+.tick-frame-corners .corner-br-v {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 2px;
+  height: 8px;
+  background-color: var(--tick-color);
+  z-index: 20;
+}
+
+/* Ruler Ticks along axes */
+.ruler-tick-x {
+  background-image: repeating-linear-gradient(
+    to right,
+    transparent,
+    transparent 19px,
+    var(--ruler-color) 19px,
+    var(--ruler-color) 20px
+  );
+}
+
+.ruler-tick-y {
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent,
+    transparent 19px,
+    var(--ruler-color) 19px,
+    var(--ruler-color) 20px
+  );
+}
+
+/* High-tech custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-grid-hairline);
+  border-radius: 2px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-muted);
+}
