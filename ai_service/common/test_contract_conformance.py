@@ -15,7 +15,13 @@ from ai_service.common.types import (
     FusionResult,
     ExecutionMeta,
 )
-from ai_service.common.errors import AIServiceError
+from ai_service.common.errors import (
+    AIServiceError,
+    INVALID_MODALITY_COMBINATION,
+    MODEL_INFERENCE_FAILED,
+)
+from ai_service.rsunivlm import mock as rsunivlm_mock
+from ai_service.fusion import mock as fusion_mock
 
 # Canonical values from CONTRACT.md §5
 CANONICAL_TOOLS = {
@@ -116,6 +122,21 @@ def assert_fusion_result(res: dict):
     assert_execution_meta(res["meta"], expected_tool="fusion_classifier")
 
 
+# ── Fixtures ──────────────────────────────────────────────────────────
+
+@pytest.fixture(autouse=True)
+def enable_fast_mock_mode():
+    """Ensure fast tests in pytest runs while allowing realistic latencies in manual verification."""
+    os.environ["MOCK_FAST_MODE"] = "1"
+    yield
+    os.environ.pop("MOCK_FAST_MODE", None)
+
+
+@pytest.fixture
+def sample_image():
+    return Image.new("RGB", (256, 256), color=(73, 109, 137))
+
+
 # ── Structural tests for Types & Errors ──────────────────────────────
 
 def test_types_and_errors_definitions():
@@ -131,3 +152,78 @@ def test_types_and_errors_definitions():
         "latency_ms": 420,
     }
     assert_execution_meta(meta, expected_tool="rsunivlm_vqa")
+
+
+# ── Mock Implementation Conformance Tests ────────────────────────────
+
+def test_mock_vqa(sample_image):
+    result = rsunivlm_mock.run_vqa(sample_image, "How many basketball courts?")
+    assert_vqa_result(result)
+
+
+def test_mock_captioning(sample_image):
+    result = rsunivlm_mock.run_captioning(sample_image)
+    assert_captioning_result(result)
+
+
+def test_mock_detection_auto_bbox(sample_image):
+    # Where query -> auto routes to bbox
+    result = rsunivlm_mock.run_detection(sample_image, "Where is the water body?", mode="auto")
+    assert_detection_result(result, expected_mode="bbox")
+    assert result["boxes"] is not None
+    assert result["mask_base64"] is None
+
+
+def test_mock_detection_auto_mask(sample_image):
+    # Highlight query -> auto routes to mask
+    result = rsunivlm_mock.run_detection(sample_image, "Highlight the water bodies in this image", mode="auto")
+    assert_detection_result(result, expected_mode="mask")
+    assert result["boxes"] is None
+    assert result["mask_base64"] is not None
+    assert result["overlay_base64"] is not None
+
+
+def test_mock_detection_explicit_modes(sample_image):
+    bbox_res = rsunivlm_mock.run_detection(sample_image, "arbitrary query", mode="bbox")
+    assert_detection_result(bbox_res, expected_mode="bbox")
+
+    mask_res = rsunivlm_mock.run_detection(sample_image, "arbitrary query", mode="mask")
+    assert_detection_result(mask_res, expected_mode="mask")
+
+
+def test_mock_change_detection(sample_image):
+    image_before = sample_image
+    image_after = sample_image.copy()
+    result = rsunivlm_mock.run_change_detection(
+        image_before, image_after, query="What changed between these two dates?"
+    )
+    assert_change_result(result)
+
+
+def test_mock_fusion(sample_image):
+    optical_img = sample_image
+    sar_img = Image.new("L", (256, 256), color=128).convert("RGB")
+    optical_img._modality = "optical"
+    sar_img._modality = "sar"
+
+    result = fusion_mock.run_fusion(
+        optical_img, sar_img, "Identify built-up and water-covered regions"
+    )
+    assert_fusion_result(result)
+
+
+def test_mock_fusion_invalid_modality(sample_image):
+    img1 = sample_image
+    img2 = sample_image.copy()
+    img1._modality = "optical"
+    img2._modality = "optical"
+
+    with pytest.raises(AIServiceError) as exc_info:
+        fusion_mock.run_fusion(img1, img2, "Identify built-up areas")
+    assert exc_info.value.code == INVALID_MODALITY_COMBINATION
+
+
+def test_mock_invalid_inputs():
+    with pytest.raises(AIServiceError) as exc_info:
+        rsunivlm_mock.run_vqa(None, "Question?")  # type: ignore
+    assert exc_info.value.code == MODEL_INFERENCE_FAILED
