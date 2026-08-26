@@ -314,6 +314,7 @@ def _dispatch_ai_sync(
         optical_img = None
         sar_img = None
         for img_input, decoded in zip(request.images, decoded_images):
+            decoded._modality = img_input.modality
             if img_input.modality == "optical":
                 optical_img = decoded
             else:
