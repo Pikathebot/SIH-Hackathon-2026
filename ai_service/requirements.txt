@@ -1,7 +1,7 @@
 # ── Core ML runtime ──
 torch>=2.1.0
 torchvision>=0.16.0
-transformers>=4.40.0
+transformers==4.46.0
 accelerate>=0.29.0
 safetensors>=0.4.0
 
@@ -23,6 +23,7 @@ scipy>=1.13.0
 
 # ── Utilities ──
 huggingface-hub>=0.22.0
+requests>=2.31.0
 
 # ── Testing ──
 pytest>=7.0.0
