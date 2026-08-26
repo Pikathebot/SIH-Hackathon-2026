@@ -1,0 +1,33 @@
+# ── Core ML runtime ──
+torch>=2.1.0
+torchvision>=0.16.0
+transformers>=4.40.0
+accelerate>=0.29.0
+safetensors>=0.4.0
+
+# ── RSUniVLM model dependencies ──
+peft>=0.4.0
+einops>=0.6.0
+timm>=0.9.0
+open-clip-torch>=2.24.0
+sentencepiece>=0.1.99
+
+# ── Image processing ──
+Pillow>=10.0.0
+opencv-python-headless>=4.9.0
+numpy>=1.26.0
+
+# ── Fusion module ──
+scikit-learn>=1.2.0
+scipy>=1.13.0
+
+# ── Utilities ──
+huggingface-hub>=0.22.0
+
+# ── Testing ──
+pytest>=7.0.0
+
+# ── Backend integration (for in-process execution) ──
+fastapi>=0.110.0
+uvicorn>=0.29.0
+python-multipart>=0.0.9
