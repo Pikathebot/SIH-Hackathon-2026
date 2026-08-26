@@ -227,3 +227,28 @@ def test_mock_invalid_inputs():
     with pytest.raises(AIServiceError) as exc_info:
         rsunivlm_mock.run_vqa(None, "Question?")  # type: ignore
     assert exc_info.value.code == MODEL_INFERENCE_FAILED
+
+
+# ── Real Fusion Wrapper Conformance Tests ─────────────────────────────
+
+def test_real_fusion_wrapper(sample_image):
+    from ai_service.fusion.wrapper import run_fusion as real_run_fusion
+    optical_img = sample_image
+    sar_img = Image.new("L", (256, 256), color=128)
+    optical_img._modality = "optical"
+    sar_img._modality = "sar"
+
+    result = real_run_fusion(optical_img, sar_img, "Identify land cover")
+    assert_fusion_result(result)
+
+
+def test_real_fusion_invalid_modality(sample_image):
+    from ai_service.fusion.wrapper import run_fusion as real_run_fusion
+    img1 = sample_image
+    img2 = sample_image.copy()
+    img1._modality = "sar"
+    img2._modality = "sar"
+
+    with pytest.raises(AIServiceError) as exc_info:
+        real_run_fusion(img1, img2, "Identify built-up areas")
+    assert exc_info.value.code == INVALID_MODALITY_COMBINATION
