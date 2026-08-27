@@ -188,7 +188,7 @@ export const MapDetectionWorkspace: React.FC = () => {
               <Upload className="w-3.5 h-3.5" />
               Upload Image
             </button>
-            <input type="file" ref={fileInputRef} onChange={handleUpload} accept="image/*" className="hidden" />
+            <input type="file" ref={fileInputRef} onChange={handleUpload} accept="image/*,.tif,.tiff" className="hidden" />
           </div>
 
           <div className="flex flex-col gap-1.5">
@@ -236,27 +236,56 @@ export const MapDetectionWorkspace: React.FC = () => {
               {result.answer}
             </p>
 
+            {/* Geospatial Coordinates Badge (GeoTIFF) */}
+            {result.visual_evidence?.geospatial && (
+              <div className="bg-primary/10 border border-primary/30 p-2.5 rounded-xl text-xs flex flex-col gap-1 font-mono">
+                <div className="flex items-center justify-between text-primary font-semibold">
+                  <span className="flex items-center gap-1">
+                    <Compass className="w-3.5 h-3.5" />
+                    <span>{result.visual_evidence.geospatial.crs}</span>
+                  </span>
+                  <span className="text-[10px] bg-primary/20 px-1.5 py-0.5 rounded">GeoTIFF Referenced</span>
+                </div>
+                <div className="text-[11px] text-text-muted">
+                  Bounds: [{result.visual_evidence.geospatial.image_bounds.join(', ')}]
+                </div>
+              </div>
+            )}
+
             {detectedBoxes.length > 0 && (
               <div className="flex flex-col gap-1.5 max-h-44 overflow-y-auto">
-                {detectedBoxes.map((_, idx) => (
-                  <button
-                    key={idx}
-                    type="button"
-                    onMouseEnter={() => setHoveredBox(idx)}
-                    onMouseLeave={() => setHoveredBox(null)}
-                    className={`flex items-center justify-between px-3 py-2 text-xs rounded-lg border transition-all text-left ${
-                      hoveredBox === idx
-                        ? 'bg-cyan-detection/10 border-cyan-detection text-text-primary'
-                        : 'bg-surface-container/40 border-grid-hairline text-text-muted hover:bg-surface-variant/30'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full bg-cyan-detection flex-shrink-0" />
-                      <span className="font-medium text-text-primary">Object #{idx + 1}</span>
-                    </div>
-                    <ChevronRight className="w-3.5 h-3.5 opacity-50" />
-                  </button>
-                ))}
+                {detectedBoxes.map((_box, idx) => {
+                  const geoPoly = result.visual_evidence?.geospatial?.geo_boxes?.[idx];
+                  const centerLat = geoPoly ? ((geoPoly[0][1] + geoPoly[2][1]) / 2).toFixed(5) : null;
+                  const centerLon = geoPoly ? ((geoPoly[0][0] + geoPoly[2][0]) / 2).toFixed(5) : null;
+
+                  return (
+                    <button
+                      key={idx}
+                      type="button"
+                      onMouseEnter={() => setHoveredBox(idx)}
+                      onMouseLeave={() => setHoveredBox(null)}
+                      className={`flex items-center justify-between px-3 py-2 text-xs rounded-lg border transition-all text-left ${
+                        hoveredBox === idx
+                          ? 'bg-cyan-detection/10 border-cyan-detection text-text-primary'
+                          : 'bg-surface-container/40 border-grid-hairline text-text-muted hover:bg-surface-variant/30'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full bg-cyan-detection flex-shrink-0" />
+                        <div>
+                          <p className="font-medium text-text-primary">Object #{idx + 1}</p>
+                          {centerLat && centerLon && (
+                            <p className="text-[10px] font-mono text-primary">
+                              {centerLat}° N, {centerLon}° E
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                      <ChevronRight className="w-3.5 h-3.5 opacity-50" />
+                    </button>
+                  );
+                })}
               </div>
             )}
 
@@ -368,7 +397,9 @@ export const MapDetectionWorkspace: React.FC = () => {
               {/* Top-right sensor badge */}
               <div className="absolute top-3 right-3 bg-surface-panel/90 backdrop-blur-md border border-grid-hairline px-3 py-1.5 rounded-xl text-xs flex items-center gap-1.5 shadow-lg">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-sensor animate-pulse" />
-                <span className="text-text-primary font-medium">Optical Layer</span>
+                <span className="text-text-primary font-medium">
+                  {result?.visual_evidence?.geospatial ? `GeoTIFF (${result.visual_evidence.geospatial.crs})` : 'Optical Layer'}
+                </span>
               </div>
 
               {/* Crosshair on hover */}

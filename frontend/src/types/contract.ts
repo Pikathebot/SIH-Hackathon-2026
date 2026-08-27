@@ -23,11 +23,18 @@ export type ToolUsed =
 
 export type VisualEvidenceType = 'none' | 'bbox' | 'mask';
 
+export interface GeospatialMetadata {
+  crs: string;
+  image_bounds: [number, number, number, number]; // [min_lon, min_lat, max_lon, max_lat] in WGS84
+  geo_boxes?: [number, number][][] | null; // [[[lon, lat], ...]]
+}
+
 export interface VisualEvidence {
   type: VisualEvidenceType;
   boxes?: [number, number, number, number][] | null;
   mask_base64?: string | null;
   overlay_base64?: string | null;
+  geospatial?: GeospatialMetadata | null;
 }
 
 export interface ExecutionSummary {

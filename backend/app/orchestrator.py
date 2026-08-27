@@ -18,13 +18,20 @@ import json
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, Tuple
 
 from PIL import Image
 
 from app.config import AI_SERVICE_MODE
+from app.geotiff import (
+    GeoMetadata,
+    is_geotiff,
+    pixel_boxes_to_geo_polygons,
+    process_geotiff,
+)
 from app.models.api import (
     ExecutionSummary,
+    GeospatialMetadata,
     QueryRequest,
     QueryResponse,
     VisualEvidence,
@@ -234,8 +241,8 @@ def classify_intent(request: QueryRequest) -> str:
 # Image decoding — base64/URL → PIL.Image at the API boundary
 # AI modules work with PIL.Image.Image objects, never raw base64.
 # ---------------------------------------------------------------------------
-def _decode_image(url_or_base64: str) -> Image.Image:
-    """Decode a base64 string or URL to a PIL Image."""
+def _decode_image(url_or_base64: str) -> Tuple[Image.Image, Optional[GeoMetadata]]:
+    """Decode a base64 string or URL to a PIL Image and optional GeoMetadata."""
     data = url_or_base64.strip()
 
     # Handle data URI scheme (e.g. "data:image/png;base64,iVBOR...")
@@ -246,7 +253,9 @@ def _decode_image(url_or_base64: str) -> Image.Image:
     # Try base64 decode
     try:
         image_bytes = base64.b64decode(data)
-        return Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        if is_geotiff(image_bytes):
+            return process_geotiff(image_bytes)
+        return Image.open(io.BytesIO(image_bytes)).convert("RGB"), None
     except Exception:
         pass
 
@@ -256,7 +265,10 @@ def _decode_image(url_or_base64: str) -> Image.Image:
             import httpx
             response = httpx.get(data, timeout=30.0, follow_redirects=True)
             response.raise_for_status()
-            return Image.open(io.BytesIO(response.content)).convert("RGB")
+            image_bytes = response.content
+            if is_geotiff(image_bytes):
+                return process_geotiff(image_bytes)
+            return Image.open(io.BytesIO(image_bytes)).convert("RGB"), None
         except Exception as exc:
             raise QueryValidationError(
                 code="UNSUPPORTED_FORMAT",
@@ -328,8 +340,8 @@ def _dispatch_ai_sync(
 # ---------------------------------------------------------------------------
 # Response assemblers — AI result TypedDict → API QueryResponse
 # ---------------------------------------------------------------------------
-def _assemble_response(task: str, result: dict) -> QueryResponse:
-    """Map an AI result dict to the API response shape."""
+def _assemble_response(task: str, result: dict, geo_meta: Optional[GeoMetadata] = None) -> QueryResponse:
+    """Map an AI result dict to the API response shape with optional GeoTIFF coordinates."""
     meta = result["meta"]
     execution_summary = ExecutionSummary(
         selected_task=task,
@@ -339,12 +351,22 @@ def _assemble_response(task: str, result: dict) -> QueryResponse:
         latency_ms=meta["latency_ms"],
     )
 
+    geospatial = None
+    if geo_meta and geo_meta.image_bounds:
+        boxes = result.get("boxes")
+        geo_boxes = pixel_boxes_to_geo_polygons(boxes, geo_meta) if boxes else None
+        geospatial = GeospatialMetadata(
+            crs=geo_meta.crs,
+            image_bounds=geo_meta.image_bounds,
+            geo_boxes=geo_boxes,
+        )
+
     if task == "vqa":
         return QueryResponse(
             answer=result["answer"],
             confidence=result["confidence"],
             task=task,
-            visual_evidence=VisualEvidence(type="none"),
+            visual_evidence=VisualEvidence(type="none", geospatial=geospatial),
             execution_summary=execution_summary,
         )
 
@@ -353,7 +375,7 @@ def _assemble_response(task: str, result: dict) -> QueryResponse:
             answer=result["caption"],
             confidence=result["confidence"],
             task=task,
-            visual_evidence=VisualEvidence(type="none"),
+            visual_evidence=VisualEvidence(type="none", geospatial=geospatial),
             execution_summary=execution_summary,
         )
 
@@ -373,6 +395,7 @@ def _assemble_response(task: str, result: dict) -> QueryResponse:
                 boxes=result.get("boxes"),
                 mask_base64=result.get("mask_base64"),
                 overlay_base64=result.get("overlay_base64"),
+                geospatial=geospatial,
             ),
             execution_summary=execution_summary,
         )
@@ -387,6 +410,7 @@ def _assemble_response(task: str, result: dict) -> QueryResponse:
                 type="mask" if has_mask else "none",
                 mask_base64=result.get("mask_base64"),
                 overlay_base64=result.get("overlay_base64"),
+                geospatial=geospatial,
             ),
             execution_summary=execution_summary,
         )
@@ -400,6 +424,7 @@ def _assemble_response(task: str, result: dict) -> QueryResponse:
                 type="mask",
                 mask_base64=result.get("classified_regions_base64"),
                 overlay_base64=result.get("classified_regions_base64"),
+                geospatial=geospatial,
             ),
             execution_summary=execution_summary,
         )
@@ -506,7 +531,9 @@ async def process_query(request: QueryRequest) -> QueryResponse:
     task = classify_intent(request)
 
     # 3. Decode images (sync — fast operation)
-    decoded_images = [_decode_image(img.url_or_base64) for img in request.images]
+    decoded_pairs = [_decode_image(img.url_or_base64) for img in request.images]
+    decoded_images = [pair[0] for pair in decoded_pairs]
+    primary_geo_meta = decoded_pairs[0][1] if decoded_pairs else None
 
     # 4. Compute checksums for DB logging
     image_checksums = [_compute_image_checksum(img) for img in decoded_images]
@@ -526,7 +553,7 @@ async def process_query(request: QueryRequest) -> QueryResponse:
         ) from exc
 
     # 6. Assemble API response
-    response = _assemble_response(task, result)
+    response = _assemble_response(task, result, geo_meta=primary_geo_meta)
 
     # 7. Log to DB (non-blocking, best-effort)
     asyncio.create_task(_log_query_to_db(request, task, response, image_checksums))
