@@ -22,9 +22,9 @@ set -e
 #  EDIT THESE PATHS
 # ============================================================================
 
-# Path to the downloaded RSUniVLM checkpoint (the folder containing config.json,
+# Path to the RSUniVLM checkpoint (the folder containing config.json,
 # model safetensors, tokenizer files, etc.)
-CKPT_PATH="/path/to/downloaded_rsunivlm_checkpoint"   # <-- EDIT THIS
+CKPT_PATH="/mnt/d/SIH-Hackathon-2026/ai_service/rsunivlm/checkpoints/RSUniVLM"
 
 # Path to the data dir created by 2_prepare_llava_data.py
 # Use WSL mount paths if data was prepared on Windows:

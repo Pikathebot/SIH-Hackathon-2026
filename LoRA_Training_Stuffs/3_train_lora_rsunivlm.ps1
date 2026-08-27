@@ -28,9 +28,9 @@ $ErrorActionPreference = "Stop"
 #  EDIT THESE PATHS
 # ============================================================================
 
-# Path to the downloaded RSUniVLM checkpoint (the folder containing config.json,
+# Path to the RSUniVLM checkpoint (the folder containing config.json,
 # model safetensors, tokenizer files, etc.)
-$CKPT_PATH = "D:\path\to\downloaded_rsunivlm_checkpoint"   # <-- EDIT THIS
+$CKPT_PATH = "D:\SIH-Hackathon-2026\ai_service\rsunivlm\checkpoints\RSUniVLM"
 
 # Path to the data dir created by 2_prepare_llava_data.py
 $DATA_DIR = "D:\SIH-Hackathon-2026\LoRA_Training_Stuffs\bigearthnet_llava"   # <-- EDIT THIS
