@@ -96,12 +96,17 @@ $LORA_R = 8
   --attn_implementation sdpa `
   --lazy_preprocess True
 
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "Training failed with exit code $LASTEXITCODE"
+    exit $LASTEXITCODE
+}
+
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Green
 Write-Host "LoRA adapter saved to: $OUTPUT_DIR" -ForegroundColor Green
 Write-Host ""
 
-if (Test-Path "$OUTPUT_DIR\adapter_model.safetensors" -or (Test-Path "$OUTPUT_DIR\adapter_model.bin")) {
+if ((Test-Path "$OUTPUT_DIR\adapter_model.safetensors") -or (Test-Path "$OUTPUT_DIR\adapter_model.bin")) {
     Write-Host "Copying fine-tuned adapter to SatQuery AI project at:"
     Write-Host "  $PROJECT_LORA_DIR"
     New-Item -ItemType Directory -Force -Path $PROJECT_LORA_DIR | Out-Null

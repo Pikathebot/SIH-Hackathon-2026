@@ -7,8 +7,14 @@ from accelerate import Accelerator
 from accelerate.utils import InitProcessGroupKwargs, GradientAccumulationPlugin
 from torch.utils.data import Dataset, Sampler, DataLoader
 
-from trl.trainer import DPOTrainer
-from trl.trainer.utils import DPODataCollatorWithPadding
+try:
+    from trl.trainer import DPOTrainer
+    from trl.trainer.utils import DPODataCollatorWithPadding
+except (ImportError, RuntimeError):
+    class DPOTrainer:
+        pass
+    class DPODataCollatorWithPadding:
+        pass
 
 from transformers import Trainer
 from transformers.trainer import is_sagemaker_mp_enabled, get_parameter_names, has_length, ALL_LAYERNORM_LAYERS, logger, is_accelerate_available, is_datasets_available, GradientAccumulationPlugin
@@ -248,9 +254,29 @@ class LLaVATrainer(Trainer):
         rank0_print("Setting NCCL timeout to INF to avoid running errors.")
 
         # create accelerator object
-        self.accelerator = Accelerator(
-            dispatch_batches=self.args.dispatch_batches, split_batches=self.args.split_batches, deepspeed_plugin=self.args.deepspeed_plugin, gradient_accumulation_plugin=gradient_accumulation_plugin, kwargs_handlers=[accelerator_kwargs]
-        )
+        try:
+            self.accelerator = Accelerator(
+                dispatch_batches=self.args.dispatch_batches, split_batches=self.args.split_batches, deepspeed_plugin=self.args.deepspeed_plugin, gradient_accumulation_plugin=gradient_accumulation_plugin, kwargs_handlers=[accelerator_kwargs]
+            )
+        except TypeError:
+            try:
+                from accelerate import DataLoaderConfiguration
+                dataloader_config = DataLoaderConfiguration(
+                    dispatch_batches=self.args.dispatch_batches,
+                    split_batches=self.args.split_batches,
+                )
+                self.accelerator = Accelerator(
+                    dataloader_config=dataloader_config,
+                    deepspeed_plugin=self.args.deepspeed_plugin,
+                    gradient_accumulation_plugin=gradient_accumulation_plugin,
+                    kwargs_handlers=[accelerator_kwargs],
+                )
+            except Exception:
+                self.accelerator = Accelerator(
+                    deepspeed_plugin=self.args.deepspeed_plugin,
+                    gradient_accumulation_plugin=gradient_accumulation_plugin,
+                    kwargs_handlers=[accelerator_kwargs],
+                )
         # some Trainer classes need to use `gather` instead of `gather_for_metrics`, thus we store a flag
         self.gather_function = self.accelerator.gather_for_metrics
 
