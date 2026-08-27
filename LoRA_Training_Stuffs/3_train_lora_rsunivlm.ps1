@@ -22,7 +22,7 @@ $env:PYTHONPATH = "$WORKSPACE_ROOT\ai_service\rsunivlm\vendor;$env:PYTHONPATH"
 # Paths
 $CKPT_PATH = "$WORKSPACE_ROOT\ai_service\rsunivlm\checkpoints\RSUniVLM"
 $DATA_DIR = "$WORKSPACE_ROOT\LoRA_Training_Stuffs\bigearthnet_llava"
-$OUTPUT_DIR = "$WORKSPACE_ROOT\LoRA_Training_Stuffs\checkpoints\rsunivlm-bigearthnet-lora"
+$OUTPUT_DIR = "$WORKSPACE_ROOT\LoRA_Training_Stuffs\checkpoints\rsunivlm-bigearthnet-txt-lora"
 $PROJECT_LORA_DIR = "$WORKSPACE_ROOT\ai_service\rsunivlm\checkpoints\lora_adapter"
 $TRAIN_SCRIPT = "$WORKSPACE_ROOT\ai_service\rsunivlm\vendor\llava\train\train.py"
 
@@ -74,8 +74,9 @@ $LORA_R = 8
   --bits 4 `
   --double_quant True `
   --quant_type nf4 `
-  --bf16 True `
+  --fp16 True `
   --output_dir "$OUTPUT_DIR" `
+  --overwrite_output_dir True `
   --num_train_epochs 1 `
   --per_device_train_batch_size 1 `
   --per_device_eval_batch_size 1 `

@@ -41,7 +41,7 @@ python "$TRAIN_SCRIPT" \
   --bits 4 \
   --double_quant True \
   --quant_type nf4 \
-  --bf16 True \
+  --fp16 True \
   --output_dir "$OUTPUT_DIR" \
   --num_train_epochs 1 \
   --per_device_train_batch_size 1 \
