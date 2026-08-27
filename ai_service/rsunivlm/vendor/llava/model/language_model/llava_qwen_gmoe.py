@@ -179,6 +179,7 @@ class LlavaQwenGMoeModel(LlavaMetaModel, Qwen2Model):
                 layer_outputs = self._gradient_checkpointing_func(
                     decoder_layer.__call__,
                     hidden_states,
+                    granularity,
                     causal_mask,
                     position_ids,
                     past_key_values,

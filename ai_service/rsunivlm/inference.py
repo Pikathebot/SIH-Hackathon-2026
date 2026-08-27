@@ -102,7 +102,12 @@ def run_raw_inference(
     Returns (text_output, elapsed_ms).
     """
     try:
-        images_pil = [img.convert("RGB") for img in images]
+        images_pil = [
+            img.convert("RGB").resize((max(img.size[0], 224), max(img.size[1], 224)), Image.Resampling.BICUBIC)
+            if (img.size[0] < 224 or img.size[1] < 224)
+            else img.convert("RGB")
+            for img in images
+        ]
         image_tensors = process_images(images_pil, image_processor, model.config)
         image_sizes = [img.size for img in images_pil]
 

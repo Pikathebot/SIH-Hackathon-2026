@@ -35,7 +35,10 @@ import torch
 
 import transformers
 import tokenizers
-import deepspeed
+try:
+    import deepspeed
+except ImportError:
+    deepspeed = None
 
 from transformers import AutoConfig
 from torch.utils.data import Dataset
@@ -185,15 +188,17 @@ class TrainingArguments(transformers.TrainingArguments):
 
 
 def maybe_zero_3(param, ignore_status=False, name=None):
-    from deepspeed import zero
-    from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
-
     if hasattr(param, "ds_id"):
-        if param.ds_status == ZeroParamStatus.NOT_AVAILABLE:
-            if not ignore_status:
-                logging.warning(f"{name}: param.ds_status != ZeroParamStatus.NOT_AVAILABLE: {param.ds_status}")
-        with zero.GatheredParameters([param]):
-            param = param.data.detach().cpu().clone()
+        try:
+            from deepspeed import zero
+            from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
+            if param.ds_status == ZeroParamStatus.NOT_AVAILABLE:
+                if not ignore_status:
+                    logging.warning(f"{name}: param.ds_status != ZeroParamStatus.NOT_AVAILABLE: {param.ds_status}")
+            with zero.GatheredParameters([param]):
+                param = param.data.detach().cpu().clone()
+        except ImportError:
+            param = param.detach().cpu().clone()
     else:
         param = param.detach().cpu().clone()
     return param
@@ -1351,16 +1356,33 @@ def get_model(model_args, training_args, bnb_model_from_pretrained_args):
 
         customized_kwargs["config"] = cfg_pretrained
 
+    low_cpu_mem = True if (training_args.bits in (4, 8) or "device_map" in customized_kwargs or "quantization_config" in customized_kwargs) else False
+
     if model_args.model_class_name is not None:
-        actual_model_class_name = f"{model_args.model_class_name}ForCausalLM"
-        model_class = getattr(transformers, actual_model_class_name)
+        actual_model_class_name = f"{model_args.model_class_name}ForCausalLM" if not model_args.model_class_name.endswith("ForCausalLM") else model_args.model_class_name
+        model_class = getattr(transformers, actual_model_class_name, None)
+        if model_class is None:
+            import llava.model as llava_models
+            model_class = getattr(llava_models, actual_model_class_name, None)
+        if model_class is None:
+            model_class = LlavaQwenGMoeForCausalLM
         rank0_print(f"Using model class {model_class} from {model_args.model_class_name}")
         model = model_class.from_pretrained(
             model_args.model_name_or_path,
             cache_dir=training_args.cache_dir,
             attn_implementation=training_args.attn_implementation,
             torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
-            low_cpu_mem_usage=False,
+            low_cpu_mem_usage=low_cpu_mem,
+            **customized_kwargs,
+        )
+    elif getattr(cfg_pretrained, "model_type", None) == "llava_qwen_gmoe" or "gmoe" in str(getattr(cfg_pretrained, "architectures", [])).lower() or "rsunivlm" in model_args.model_name_or_path.lower():
+        rank0_print(f"Using LlavaQwenGMoeForCausalLM for RSUniVLM model {model_args.model_name_or_path}")
+        model = LlavaQwenGMoeForCausalLM.from_pretrained(
+            model_args.model_name_or_path,
+            cache_dir=training_args.cache_dir,
+            attn_implementation=training_args.attn_implementation,
+            torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
+            low_cpu_mem_usage=low_cpu_mem,
             **customized_kwargs,
         )
     elif model_args.vision_tower is not None:
@@ -1370,19 +1392,20 @@ def get_model(model_args, training_args, bnb_model_from_pretrained_args):
                 cache_dir=training_args.cache_dir,
                 attn_implementation=training_args.attn_implementation,
                 torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
-                low_cpu_mem_usage=False,
+                low_cpu_mem_usage=low_cpu_mem,
                 **customized_kwargs,
             )
             from transformers.models.mixtral.modeling_mixtral import MixtralSparseMoeBlock
 
-            deepspeed.utils.set_z3_leaf_modules(model, [MixtralSparseMoeBlock])
+            if deepspeed is not None:
+                deepspeed.utils.set_z3_leaf_modules(model, [MixtralSparseMoeBlock])
         elif "mistral" in model_args.model_name_or_path.lower() or "zephyr" in model_args.model_name_or_path.lower():
             model = LlavaMistralForCausalLM.from_pretrained(
                 model_args.model_name_or_path,
                 cache_dir=training_args.cache_dir,
                 attn_implementation=training_args.attn_implementation,
                 torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
-                low_cpu_mem_usage=False,
+                low_cpu_mem_usage=low_cpu_mem,
                 **customized_kwargs,
             )
         elif (
@@ -1398,29 +1421,39 @@ def get_model(model_args, training_args, bnb_model_from_pretrained_args):
                 cache_dir=training_args.cache_dir,
                 attn_implementation=training_args.attn_implementation,
                 torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
-                low_cpu_mem_usage=False,
+                low_cpu_mem_usage=low_cpu_mem,
                 **customized_kwargs,
             )
         elif "qwen" in model_args.model_name_or_path.lower():
-            if "moe" in model_args.model_name_or_path.lower() or "A14B" in model_args.model_name_or_path:
+            if "gmoe" in model_args.model_name_or_path.lower():
+                model = LlavaQwenGMoeForCausalLM.from_pretrained(
+                    model_args.model_name_or_path,
+                    cache_dir=training_args.cache_dir,
+                    attn_implementation=training_args.attn_implementation,
+                    torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
+                    low_cpu_mem_usage=low_cpu_mem,
+                    **customized_kwargs,
+                )
+            elif "moe" in model_args.model_name_or_path.lower() or "A14B" in model_args.model_name_or_path:
                 model = LlavaQwenMoeForCausalLM.from_pretrained(
                     model_args.model_name_or_path,
                     cache_dir=training_args.cache_dir,
                     attn_implementation=training_args.attn_implementation,
                     torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
-                    low_cpu_mem_usage=False,
+                    low_cpu_mem_usage=low_cpu_mem,
                     **customized_kwargs,
                 )
                 from transformers.models.qwen2_moe.modeling_qwen2_moe import Qwen2MoeSparseMoeBlock
 
-                deepspeed.utils.set_z3_leaf_modules(model, [Qwen2MoeSparseMoeBlock])
+                if deepspeed is not None:
+                    deepspeed.utils.set_z3_leaf_modules(model, [Qwen2MoeSparseMoeBlock])
             else:
                 model = LlavaQwenForCausalLM.from_pretrained(
                     model_args.model_name_or_path,
                     cache_dir=training_args.cache_dir,
                     attn_implementation=training_args.attn_implementation,
                     torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
-                    low_cpu_mem_usage=False,
+                    low_cpu_mem_usage=low_cpu_mem,
                     **customized_kwargs,
                 )
         elif "gemma" in model_args.model_name_or_path.lower():
@@ -1429,7 +1462,7 @@ def get_model(model_args, training_args, bnb_model_from_pretrained_args):
                 cache_dir=training_args.cache_dir,
                 attn_implementation=training_args.attn_implementation,
                 torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
-                low_cpu_mem_usage=False,
+                low_cpu_mem_usage=low_cpu_mem,
                 **customized_kwargs,
             )
         else:
@@ -1440,7 +1473,7 @@ def get_model(model_args, training_args, bnb_model_from_pretrained_args):
             cache_dir=training_args.cache_dir,
             attn_implementation=training_args.attn_implementation,
             torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
-            low_cpu_mem_usage=False,
+            low_cpu_mem_usage=low_cpu_mem,
             **customized_kwargs,
         )
     return model
@@ -1469,8 +1502,6 @@ def train(attn_implementation=None):
         bnb_model_from_pretrained_args.update(
             dict(
                 device_map={"": training_args.device},
-                load_in_4bit=training_args.bits == 4,
-                load_in_8bit=training_args.bits == 8,
                 quantization_config=BitsAndBytesConfig(
                     load_in_4bit=training_args.bits == 4,
                     load_in_8bit=training_args.bits == 8,
@@ -1538,8 +1569,6 @@ def train(attn_implementation=None):
         or "vicuna" in model_args.model_name_or_path.lower()
         or "llama" in model_args.model_name_or_path.lower()
         or "yi" in model_args.model_name_or_path.lower()
-        or "nous-hermes" in model_args.model_name_or_path.lower()
-        and "wizard-2" in model_args.model_name_or_path.lower()
     ):
         tokenizer = transformers.AutoTokenizer.from_pretrained(
             model_args.model_name_or_path,
@@ -1548,6 +1577,22 @@ def train(attn_implementation=None):
             padding_side="right",
             use_fast=False,
         )
+    else:
+        try:
+            tokenizer = transformers.AutoTokenizer.from_pretrained(
+                model_args.model_name_or_path,
+                cache_dir=training_args.cache_dir,
+                model_max_length=training_args.model_max_length,
+                padding_side="right",
+                use_fast=False,
+            )
+        except Exception:
+            tokenizer = transformers.AutoTokenizer.from_pretrained(
+                model_args.model_name_or_path,
+                cache_dir=training_args.cache_dir,
+                model_max_length=training_args.model_max_length,
+                padding_side="right",
+            )
 
     rank0_print(f"Prompt version: {model_args.version}")
     if model_args.version == "v0":
@@ -1567,8 +1612,12 @@ def train(attn_implementation=None):
         else:
             conversation_lib.default_conversation = conversation_lib.conv_templates["vicuna_v1"]
 
-    if model_args.vision_tower is not None:
-        model.get_model().initialize_vision_modules(model_args=model_args, fsdp=training_args.fsdp)
+    if model_args.vision_tower is None and hasattr(model.config, "mm_vision_tower") and model.config.mm_vision_tower:
+        model_args.vision_tower = model.config.mm_vision_tower
+
+    if model_args.vision_tower is not None or (hasattr(model, "get_vision_tower") and model.get_vision_tower() is not None):
+        if not hasattr(model.get_model(), "vision_tower") or model.get_vision_tower() is None:
+            model.get_model().initialize_vision_modules(model_args=model_args, fsdp=training_args.fsdp)
 
         vision_tower = model.get_vision_tower()
         vision_tower.to(dtype=torch.bfloat16 if training_args.bf16 else torch.float16, device=training_args.device)
