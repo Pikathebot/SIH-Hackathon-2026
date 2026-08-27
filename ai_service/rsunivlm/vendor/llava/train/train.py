@@ -35,7 +35,10 @@ import torch
 
 import transformers
 import tokenizers
-import deepspeed
+try:
+    import deepspeed
+except ImportError:
+    deepspeed = None
 
 from transformers import AutoConfig
 from torch.utils.data import Dataset

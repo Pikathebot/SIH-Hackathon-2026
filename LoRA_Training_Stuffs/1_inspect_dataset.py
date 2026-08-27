@@ -35,7 +35,7 @@ def try_load(dataset_id: str):
     """Attempt to load a dataset in streaming mode, return iterator or None."""
     print(f"\nTrying dataset: {dataset_id}")
     try:
-        ds = load_dataset(dataset_id, split="train", streaming=True)
+        ds = load_dataset(dataset_id, split="all_data", streaming=True)
         return ds
     except Exception as e:
         error_msg = str(e)
