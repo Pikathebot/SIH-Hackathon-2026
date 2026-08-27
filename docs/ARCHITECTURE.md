@@ -16,21 +16,21 @@
                                                             │ in-process Python calls
                                                             │ (see §3 — not network calls)
                                         ┌───────────────────┴───────────────────┐
-                                        ▼                                       ▼
-                          ┌─────────────────────────┐             ┌─────────────────────────┐
-                          │ ai_service/rsunivlm      │             │ ai_service/fusion        │
-                          │ Person 1                 │             │ Person 2                 │
-                          │ run_vqa / run_captioning  │             │ run_fusion                │
-                          │ run_detection / run_change│             │                           │
-                          └─────────────────────────┘             └─────────────────────────┘
-                                        │                                       │
-                                        ▼                                       ▼
-                              RSUniVLM checkpoint +                  fusion classifier +
-                              LoRA adapter (filesystem)               shared encoder (filesystem)
+                                        ▼                                       
+                              ┌─────────────────────────┐             ┌─────────────────────────┐
+                              │ ai_service/rsunivlm      │             │ ai_service/fusion        │
+                              │ Person 1                 │             │ Person 2                 │
+                              │ run_vqa / run_captioning  │             │ run_fusion                │
+                              │ run_detection / run_change│             │ (spectral+backscatter)  │
+                              └─────────────────────────┘             └─────────────────────────┘
+                                            │                                       │
+                                            ▼                                       ▼
+                                  RSUniVLM (SigLIP+Qwen 1.5)             Optical spectral indices +
+                                  + BigEarthNet LoRA Adapter             Sentinel-1 radar backscatter
 
-                          ┌─────────────────────────┐
-                          │  SQLite (satquery.db)    │◀── query log, image metadata (backend/data/)
-                          └─────────────────────────┘
+                              ┌─────────────────────────┐
+                              │  SQLite (satquery.db)    │◀── query log, image metadata (backend/data/)
+                              └─────────────────────────┘
 ```
 
 ## 2. Request lifecycle

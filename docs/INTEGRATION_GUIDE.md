@@ -48,9 +48,9 @@ This means nobody is ever blocked waiting for someone else's model to finish tra
 Single `.env.example` at repo root, copied to `.env` locally (gitignored):
 
 ```
-AI_SERVICE_MODE=mock          # mock | real
-RSUNIVLM_CHECKPOINT_PATH=./ai_service/rsunivlm/checkpoints/base.pt
-RSUNIVLM_LORA_ADAPTER_PATH=./ai_service/rsunivlm/checkpoints/lora_adapter.pt
+AI_SERVICE_MODE=real          # mock | real
+RSUNIVLM_CHECKPOINT_PATH=./ai_service/rsunivlm/checkpoints/RSUniVLM
+RSUNIVLM_LORA_ADAPTER_PATH=./ai_service/rsunivlm/checkpoints/lora_adapter
 FUSION_MODEL_PATH=./ai_service/fusion/checkpoints/classifier.pkl
 BACKEND_PORT=8000
 FRONTEND_PORT=3000

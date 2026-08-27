@@ -1,6 +1,6 @@
 # API_CONTRACT.md — Frontend ↔ Backend HTTP Contract
 
-**Version:** 1.0.0
+**Version:** 1.1.0
 **Base URL (local dev):** `http://localhost:8000`
 **Consumers:** `frontend/` (Person 4)
 **Producers:** `backend/` (Person 3)
@@ -52,7 +52,14 @@ Constraints:
     "type": "none | bbox | mask",
     "boxes": [[51, 384, 235, 506]],
     "mask_base64": null,
-    "overlay_base64": null
+    "overlay_base64": null,
+    "geospatial": {
+      "crs": "EPSG:4326",
+      "image_bounds": [12.720, 48.090, 12.760, 48.130],
+      "geo_boxes": [
+        [[12.730, 48.100], [12.750, 48.100], [12.750, 48.120], [12.730, 48.120], [12.730, 48.100]]
+      ]
+    }
   },
   "execution_summary": {
     "selected_task": "change_detection",
