@@ -6,6 +6,7 @@ Implements the exact TypedDict shapes and signatures from AI_SERVICE_CONTRACT.md
 import base64
 import io
 import os
+import sys
 import time
 from typing import Literal, Optional
 from PIL import Image

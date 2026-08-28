@@ -17,7 +17,7 @@ if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
 from ai_service.common.errors import AIServiceError
-from ai_service.rsunivlm.inference import (
+from ai_service.rsunivlm.parsing import (
     parse_bounding_boxes,
     parse_segmentation_output,
     create_overlay_image,

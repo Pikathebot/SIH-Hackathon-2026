@@ -298,9 +298,14 @@ def run_tests(base_url: str = None):
                 passed += 1
                 data = resp.json()
                 print(f"  \033[92m✔ PASS\033[0m (Status: {resp.status_code})")
-                if "answer" in data:
+                if data.get("task"):
                     print(f"    • Task:        {data.get('task')}")
-                    print(f"    • Answer:      {data.get('answer')[:75]}...")
+                    if data.get("answer"):
+                        print(f"    • Answer:      {data.get('answer')[:75]}...")
+                    elif data.get("visual_evidence", {}).get("boxes"):
+                        print(f"    • Boxes Found: {len(data['visual_evidence']['boxes'])}")
+                    elif data.get("visual_evidence", {}).get("mask_base64"):
+                        print(f"    • Mask Size:   Binary mask generated")
                     print(f"    • Confidence:  {data.get('confidence'):.2f} (Source: {data.get('execution_summary', {}).get('parameters', {}).get('confidence_source', 'heuristic')})")
                     print(f"    • Tool Used:   {data.get('execution_summary', {}).get('tool_used')}")
                     print(f"    • Latency:     {data.get('execution_summary', {}).get('latency_ms')} ms")
