@@ -155,6 +155,7 @@ def run_raw_inference(
                 modalities=["image"] * len(image_sizes),
                 do_sample=False,
                 temperature=0,
+                repetition_penalty=1.15,
                 max_new_tokens=max_new_tokens,
                 granularity=granularity,
                 return_dict_in_generate=True,
@@ -168,7 +169,8 @@ def run_raw_inference(
                 seq = gen_out
                 scores = None
 
-            text_output = tokenizer.batch_decode(seq, skip_special_tokens=True)[0]
+            raw_text = tokenizer.batch_decode(seq, skip_special_tokens=True)[0]
+            text_output = clean_vlm_text_output(raw_text)
 
             logit_conf = None
             if scores:
@@ -182,7 +184,7 @@ def run_raw_inference(
 
         elapsed_ms = int((time.time() - start_time) * 1000)
 
-        return text_output.strip(), elapsed_ms, logit_conf
+        return text_output, elapsed_ms, logit_conf
     except Exception as e:
         raise AIServiceError(
             code=MODEL_INFERENCE_FAILED,
@@ -199,4 +201,5 @@ from ai_service.rsunivlm.parsing import (
     create_overlay_image,
     image_to_base64,
     mask_to_base64,
+    clean_vlm_text_output,
 )
