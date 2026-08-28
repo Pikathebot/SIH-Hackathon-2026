@@ -26,6 +26,7 @@ from ai_service.rsunivlm.inference import (
     extract_water_spectral_mask,
     extract_coastline_contour,
     clean_vlm_text_output,
+    resolve_detection_mode,
     image_to_base64,
     mask_to_base64,
 )
@@ -160,23 +161,7 @@ def run_detection(
         )
 
     q_lower = query.lower()
-
-    q_lower = query.lower()
-
-    if mode == "auto":
-        if any(w in q_lower for w in [
-            "highlight", "segment", "mask", "boundary", "outline", "delineate", "extent", "coverage",
-            "water", "river", "lake", "flood", "ocean", "sea", "reservoir", "waterbody", "stream",
-            "coast", "coastline", "coastal", "shore", "shoreline", "waterline", "land-water",
-            "landmass", "land mass", "land", "terrain", "ground", "vegetation", "forest", "urban", "city", "built-up"
-        ]):
-            resolved_mode = "mask"
-        elif any(w in q_lower for w in ["where", "locate", "find", "box"]):
-            resolved_mode = "bbox"
-        else:
-            resolved_mode = "bbox"
-    else:
-        resolved_mode = mode
+    resolved_mode = resolve_detection_mode(query, mode=mode)
 
     tokenizer, model, processor = _get_model()
 

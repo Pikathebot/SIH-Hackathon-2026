@@ -195,6 +195,7 @@ def run_raw_inference(
 
 # Re-export pure parsing utilities from parsing.py
 from ai_service.rsunivlm.parsing import (
+    resolve_detection_mode,
     extract_water_spectral_mask,
     extract_coastline_contour,
     parse_segmentation_output,

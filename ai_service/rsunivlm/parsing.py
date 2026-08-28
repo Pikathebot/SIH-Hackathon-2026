@@ -13,6 +13,87 @@ import cv2
 import numpy as np
 from PIL import Image
 
+# Canonical detection routing keywords according to AI_SERVICE_CONTRACT.md §2:
+BBOX_ROUTING_KEYWORDS = [
+    "where",
+    "locate",
+    "find",
+    "box",
+]
+
+MASK_ROUTING_KEYWORDS = [
+    # Area delineation actions
+    "highlight",
+    "segment",
+    "mask",
+    "boundary",
+    "outline",
+    "delineate",
+    "extent",
+    "coverage",
+    # Continuous water & coastal features
+    "water",
+    "river",
+    "lake",
+    "flood",
+    "ocean",
+    "sea",
+    "reservoir",
+    "waterbody",
+    "stream",
+    "coast",
+    "coastline",
+    "coastal",
+    "shore",
+    "shoreline",
+    "waterline",
+    "land-water",
+    # Continuous landcover & terrain features
+    "landmass",
+    "land mass",
+    "land",
+    "terrain",
+    "ground",
+    "vegetation",
+    "forest",
+    "urban",
+    "city",
+    "built-up",
+]
+
+
+def resolve_detection_mode(query: str, mode: str = "auto") -> str:
+    """
+    Resolves the execution mode ('bbox' vs 'mask') for object/feature detection.
+    Single source of truth implementing AI_SERVICE_CONTRACT.md §2:
+
+    mode='auto' routing rule:
+      1. If query contains localization action keywords ('where', 'locate', 'find', 'box'),
+         route to 'bbox' (Visual Grounding [VG] fast path). Localization intent takes precedence
+         over subject keywords (e.g. 'Where is the water body?' -> 'bbox').
+      2. If query contains mask delineation actions or continuous land/water/environmental
+         feature terms ('highlight', 'segment', 'mask', 'boundary', 'outline', 'delineate',
+         'water', 'coastline', 'landmass', etc.), route to 'mask' (Segmentation [SEG]).
+      3. Otherwise default to 'bbox' (fast path) unless query explicitly requests a mask.
+
+    If mode is explicitly 'bbox' or 'mask', returns that mode directly.
+    """
+    if mode in ("bbox", "mask"):
+        return mode
+
+    q_lower = query.lower()
+
+    # 1. Localization action keywords take precedence
+    if any(w in q_lower for w in BBOX_ROUTING_KEYWORDS):
+        return "bbox"
+
+    # 2. Mask / segmentation / continuous feature queries
+    if any(w in q_lower for w in MASK_ROUTING_KEYWORDS):
+        return "mask"
+
+    # 3. Default fast path
+    return "bbox"
+
 
 def extract_water_spectral_mask(image_pil: Image.Image) -> np.ndarray:
     """
