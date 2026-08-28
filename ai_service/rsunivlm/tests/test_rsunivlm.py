@@ -139,6 +139,12 @@ class TestRSUniVLMDetection:
         assert result["mode"] == "mask"
         assert result["meta"]["tool_used"] == "rsunivlm_seg"
 
+    def test_run_detection_auto_routing_coastline(self, sample_optical_image):
+        result = run_detection(sample_optical_image, "Detect coastal lines in this image", mode="auto")
+        assert result["mode"] == "mask"
+        assert result["meta"]["tool_used"] == "rsunivlm_seg"
+        assert result["mask_base64"] is not None
+
 
 # ── Change Detection Tests ────────────────────────────────────────────────
 class TestRSUniVLMChangeDetection:
@@ -170,6 +176,14 @@ class TestVisionUtilities:
         assert mask[50, 50] == 255
         # The dry vegetation at (150, 150) should not be detected as water
         assert mask[150, 150] == 0
+
+    def test_extract_coastline_contour(self, sample_optical_image):
+        from ai_service.rsunivlm.parsing import extract_coastline_contour
+        mask = extract_water_spectral_mask(sample_optical_image)
+        contour = extract_coastline_contour(mask, thickness=2)
+        assert isinstance(contour, np.ndarray)
+        assert contour.shape == mask.shape
+        assert np.count_nonzero(contour) > 0
 
     def test_create_overlay_image(self, sample_optical_image):
         mask = np.zeros((sample_optical_image.height, sample_optical_image.width), dtype=np.uint8)
