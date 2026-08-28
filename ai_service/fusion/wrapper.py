@@ -86,15 +86,23 @@ def run_fusion(
         B = opt_np[:, :, 2]
 
         # ── 1. Optical Spectral Analysis ─────────────────────────────
-        # Visible Green Vegetation Index (VDVI) & Normalized Difference Water Index (NDWI)
+        # Check if optical image is single-channel/grayscale (e.g. single NIR/SWIR band or grayscale preview)
+        is_opt_grayscale = np.allclose(R, G, atol=0.02) and np.allclose(G, B, atol=0.02)
         eps = 1e-6
-        green_index = (2 * G - R - B) / (2 * G + R + B + eps)
-        water_index = (B - R) / (B + R + eps)
-        ndwi = (G - R) / (G + R + eps)
         brightness = (R + G + B) / 3.0
 
-        opt_veg_mask = (green_index > 0.04) & (G > B) & (brightness > 0.12)
-        opt_water_mask = (water_index > 0.05) & (B >= G - 0.05) & (brightness < 0.60) & (R < 0.45)
+        if is_opt_grayscale:
+            # Grayscale / Single-Band NIR/SWIR optical interpretation:
+            # In NIR/optical bands, water is strongly absorbed (< 0.20), vegetation is reflective (> 0.35)
+            opt_water_mask = brightness < 0.20
+            opt_veg_mask = (brightness >= 0.35) & (brightness < 0.95)
+            green_index = np.zeros_like(brightness)
+        else:
+            # Visible Green Vegetation Index (VDVI) & Normalized Difference Water Index (NDWI)
+            green_index = (2 * G - R - B) / (2 * G + R + B + eps)
+            water_index = (B - R) / (B + R + eps)
+            opt_veg_mask = (green_index > 0.04) & (G > B) & (brightness > 0.12)
+            opt_water_mask = (water_index > 0.05) & (B >= G - 0.05) & (brightness < 0.60) & (R < 0.45)
 
         # ── 2. SAR Radar Backscatter Analysis ────────────────────────
         # High backscatter (> 0.60): Double-bounce corner reflectors (built-up, concrete, metal)
@@ -122,14 +130,14 @@ def run_fusion(
         # 0: Water (Blue), 1: Vegetation (Green), 2: Built-up (Red)
         classified_map = np.zeros((target_size[1], target_size[0], 3), dtype=np.uint8)
 
-        # Fused Water: optical water confirmed by SAR low specular reflection or strong absorption
-        fused_water = (opt_water_mask & (sar_np < 0.30)) | (opt_water_mask & sar_specular_water)
-        # Morphological smoothing for river connectivity
+        # Fused Water: optical water confirmed by SAR low specular reflection or non-double-bounce
+        fused_water = (opt_water_mask & (sar_np < 0.40)) | (opt_water_mask & sar_specular_water)
+        # Morphological smoothing for water connectivity
         kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
         fused_water = cv2.morphologyEx(fused_water.astype(np.uint8), cv2.MORPH_CLOSE, kernel).astype(bool)
 
-        # Fused Vegetation: optical greenness confirmed by SAR roughness
-        fused_veg = ((opt_veg_mask & sar_volume_veg) | (green_index > 0.12)) & ~fused_water
+        # Fused Vegetation: optical greenness / NIR brightness confirmed by SAR roughness
+        fused_veg = ((opt_veg_mask & sar_volume_veg) | (green_index > 0.12) | (opt_veg_mask & (sar_np < 0.60))) & ~fused_water
         # Built-up: SAR double bounce OR high optical structural texture
         fused_urban = (sar_high_backscatter | (~fused_water & ~fused_veg)) & ~fused_water
 
