@@ -19,13 +19,17 @@ from PIL import Image
 
 logger = logging.getLogger(__name__)
 
-# GeoTIFF magic byte signatures
-_TIFF_MAGIC = (
-    b"II*\x00",  # Little-endian TIFF
-    b"MM\x00*",  # Big-endian TIFF
-    b"II+\x00",  # Little-endian BigTIFF
-    b"MM\x00+",  # Big-endian BigTIFF
+# Geospatial raster magic byte signatures (TIFF, BigTIFF, and JPEG 2000 JP2/J2K)
+_GEORASTER_MAGIC = (
+    b"II*\x00",                              # Little-endian TIFF
+    b"MM\x00*",                              # Big-endian TIFF
+    b"II+\x00",                              # Little-endian BigTIFF
+    b"MM\x00+",                              # Big-endian BigTIFF
+    b"\x00\x00\x00\x0cjP  \r\n\x87\n",       # Standard JPEG 2000 (.jp2) file signature
+    b"\x00\x00\x00\x0c",                     # Short JP2 box header
+    b"\xff\x4f\xff\x51",                     # JPEG 2000 codestream (SOC/SIZ marker .j2k/.j2c)
 )
+_TIFF_MAGIC = _GEORASTER_MAGIC  # Backward compatibility alias
 
 
 @dataclass
@@ -41,11 +45,10 @@ class GeoMetadata:
 
 
 def is_geotiff(data_bytes: bytes) -> bool:
-    """Checks if raw bytes start with a valid TIFF/GeoTIFF header."""
+    """Checks if raw bytes start with a valid TIFF/GeoTIFF or JPEG 2000 (JP2) header."""
     if len(data_bytes) < 4:
         return False
-    header = data_bytes[:4]
-    return any(header.startswith(m) for m in _TIFF_MAGIC)
+    return any(data_bytes.startswith(m) for m in _GEORASTER_MAGIC)
 
 
 def normalize_band_percentile(

@@ -315,7 +315,7 @@ export const QueryComposer: React.FC<QueryComposerProps> = ({
               ref={fileInputRef}
               onChange={handleFileUpload}
               multiple
-              accept="image/*,.tif,.tiff"
+              accept="image/*,.tif,.tiff,.jp2,.j2k,.jpx,.jpc,.jpf"
               className="hidden"
             />
             <button

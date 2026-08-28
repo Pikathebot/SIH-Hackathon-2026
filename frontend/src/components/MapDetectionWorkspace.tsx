@@ -201,7 +201,7 @@ export const MapDetectionWorkspace: React.FC = () => {
               <Upload className="w-3.5 h-3.5" />
               Upload Image
             </button>
-            <input type="file" ref={fileInputRef} onChange={handleUpload} accept="image/*,.tif,.tiff" className="hidden" />
+            <input type="file" ref={fileInputRef} onChange={handleUpload} accept="image/*,.tif,.tiff,.jp2,.j2k,.jpx,.jpc,.jpf" className="hidden" />
           </div>
 
           <div className="flex flex-col gap-1.5">

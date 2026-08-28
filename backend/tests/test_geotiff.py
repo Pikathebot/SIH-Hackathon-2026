@@ -51,11 +51,13 @@ def _create_synthetic_geotiff_bytes(
 
 
 class TestGeoTIFFDetectionAndProcessing:
-    """Test GeoTIFF magic byte check and band decoding."""
+    """Test GeoTIFF and JP2 magic byte check and band decoding."""
 
     def test_magic_byte_detection(self):
         tiff_bytes = _create_synthetic_geotiff_bytes()
         assert is_geotiff(tiff_bytes) is True
+        assert is_geotiff(b"\x00\x00\x00\x0cjP  \r\n\x87\n\x00\x00") is True
+        assert is_geotiff(b"\xff\x4f\xff\x51\x00\x2f\x00\x02") is True
         assert is_geotiff(b"PNG\r\n\x1a\n") is False
         assert is_geotiff(b"") is False
 
@@ -81,6 +83,32 @@ class TestGeoTIFFDetectionAndProcessing:
         assert len(geo_meta.image_bounds) == 4
         assert geo_meta.image_bounds[0] == pytest.approx(12.5, abs=0.01)
         assert geo_meta.image_bounds[1] == pytest.approx(48.5, abs=0.01)
+
+    def test_process_jp2_raster(self):
+        """Test decoding JPEG 2000 raster bytes via JP2OpenJPEG driver."""
+        width, height = 32, 32
+        transform = from_bounds(10.0, 40.0, 10.1, 40.1, width, height)
+
+        with rasterio.io.MemoryFile() as memfile:
+            with memfile.open(
+                driver="JP2OpenJPEG",
+                height=height,
+                width=width,
+                count=3,
+                dtype=np.uint8,
+                crs="EPSG:4326",
+                transform=transform,
+            ) as dst:
+                for i in range(1, 4):
+                    dst.write(np.full((height, width), i * 60, dtype=np.uint8), i)
+
+            jp2_bytes = memfile.read()
+
+        assert is_geotiff(jp2_bytes) is True
+        img, geo_meta = process_geotiff(jp2_bytes)
+        assert isinstance(img, Image.Image)
+        assert img.size == (32, 32)
+        assert img.mode == "RGB"
 
     def test_process_sar_geotiff(self):
         tiff_bytes = _create_synthetic_geotiff_bytes(
