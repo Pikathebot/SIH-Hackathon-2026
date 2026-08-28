@@ -30,10 +30,33 @@ def extract_water_spectral_mask(image_pil: Image.Image) -> np.ndarray:
     blue_green_ratio = (B - G) / (B + G + eps)
     brightness = (R + G + B) / 3.0
 
-    # 1. Coastal / River / Shallow water: positive blue contrast, balanced green, low red
-    coastal_river_water = (blue_ratio > 0.04) & (blue_green_ratio > -0.35) & (brightness < 0.65) & (R < 0.40)
-    # 2. Deep ocean / dark calm water: low overall reflectance with blue dominating over red
-    deep_dark_water = (brightness < 0.25) & (R < 0.18) & (B >= R - 0.03)
+    # Max-min channel dispersion (color difference / saturation proxy)
+    max_c = np.maximum(np.maximum(R, G), B)
+    min_c = np.minimum(np.minimum(R, G), B)
+    spread = max_c - min_c
+
+    # 1. Coastal / River / Shallow water: clear blue/cyan dominance, low red, positive blue-to-red contrast
+    coastal_river_water = (
+        (blue_ratio > 0.06) &
+        (blue_green_ratio > -0.30) &
+        (brightness < 0.60) &
+        (R < 0.25) &
+        (B > R)
+    )
+
+    # 2. Deep ocean / clear dark water: tightly constrained against terrestrial shadows & asphalt:
+    # - Strict blue dominance over red (B > R + 0.01)
+    # - Red lower than or equal to Green
+    # - Low color variance / spread across channels
+    # - Low brightness and strictly low red reflectance
+    deep_dark_water = (
+        (brightness < 0.16) &
+        (R < 0.08) &
+        (B > R + 0.01) &
+        (G >= R) &
+        (spread < 0.08) &
+        (blue_ratio > 0.10)
+    )
 
     water_condition = coastal_river_water | deep_dark_water
 

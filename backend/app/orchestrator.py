@@ -351,6 +351,8 @@ def _assemble_response(
     params = dict(meta.get("parameters") or {})
     if geo_meta and geo_meta.band_resolution_tier:
         params["band_resolution_tier"] = geo_meta.band_resolution_tier
+    if geo_meta and geo_meta.band_resolution_warning:
+        params["band_resolution_warning"] = geo_meta.band_resolution_warning
 
     execution_summary = ExecutionSummary(
         selected_task=task,

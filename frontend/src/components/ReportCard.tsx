@@ -104,6 +104,17 @@ export const ReportCard: React.FC<ReportCardProps> = ({
           {response.answer || 'Analysis complete. Visual results are shown below.'}
         </div>
 
+        {/* Unverified Band Ordering Warning */}
+        {response.execution_summary?.parameters?.band_resolution_warning && (
+          <div className="flex items-start gap-2.5 p-3.5 bg-amber-500/10 border border-amber-500/30 rounded-xl text-amber-300 text-xs">
+            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+            <div>
+              <span className="font-semibold text-amber-200">Band Order Unverified: </span>
+              <span className="opacity-90">{String(response.execution_summary.parameters.band_resolution_warning)}</span>
+            </div>
+          </div>
+        )}
+
         {/* Visual Evidence Viewports */}
         {hasVisualEvidence ? (
           <div className="flex flex-col gap-3">

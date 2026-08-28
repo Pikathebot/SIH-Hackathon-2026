@@ -237,9 +237,10 @@ class TestDynamicBandResolution:
         img, geo_meta = process_geotiff(raw_bytes)
         assert geo_meta is not None
         assert geo_meta.band_resolution_tier == "sentinel2_full_stack_heuristic"
+        assert geo_meta.band_resolution_warning is None
 
     def test_tier4_default_standard_stack(self):
-        """Tier 4: Standard 3/4-band GeoTIFF defaults to (1, 2, 3)."""
+        """Tier 4: Standard 3/4-band GeoTIFF defaults to (1, 2, 3) with warning."""
         width, height = 16, 16
         transform = from_bounds(10.0, 40.0, 10.1, 40.1, width, height)
 
@@ -262,3 +263,5 @@ class TestDynamicBandResolution:
         img, geo_meta = process_geotiff(raw_bytes)
         assert geo_meta is not None
         assert geo_meta.band_resolution_tier == "default_123"
+        assert geo_meta.band_resolution_warning is not None
+        assert "No photometric or band description" in geo_meta.band_resolution_warning
