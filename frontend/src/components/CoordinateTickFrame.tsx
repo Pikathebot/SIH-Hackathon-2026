@@ -54,9 +54,13 @@ export const CoordinateTickFrame: React.FC<CoordinateTickFrameProps> = ({
     ? (visualEvidence.overlay_base64 || visualEvidence.mask_base64)
     : null;
 
+  const rawImage = imageUrl && (imageUrl.startsWith('data:image/tiff') || imageUrl.startsWith('data:application/octet-stream'))
+    ? undefined
+    : imageUrl;
+
   const displayImage = maskSrc 
     ? (maskSrc.startsWith('data:') ? maskSrc : `data:image/png;base64,${maskSrc}`)
-    : imageUrl;
+    : rawImage;
 
   return (
     <div className="flex flex-col gap-1.5 w-full">

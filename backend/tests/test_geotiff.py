@@ -118,3 +118,147 @@ class TestCoordinateProjection:
         for pt in poly:
             assert 10.0 <= pt[0] <= 10.1
             assert 50.0 <= pt[1] <= 50.1
+
+
+class TestDynamicBandResolution:
+    """Tests for metadata-aware band selection tiers in process_geotiff."""
+
+    def test_tier1_colorinterp_explicit(self):
+        """Tier 1: Verify src.colorinterp resolves custom BGR band arrangements."""
+        from rasterio.enums import ColorInterp
+        width, height = 32, 32
+        transform = from_bounds(10.0, 40.0, 10.1, 40.1, width, height)
+
+        with rasterio.io.MemoryFile() as memfile:
+            with memfile.open(
+                driver="GTiff",
+                height=height,
+                width=width,
+                count=4,
+                dtype=np.uint8,
+                crs="EPSG:4326",
+                transform=transform,
+            ) as dst:
+                # Set inverted order: 1: Blue, 2: Green, 3: Red, 4: Alpha
+                dst.colorinterp = (ColorInterp.blue, ColorInterp.green, ColorInterp.red, ColorInterp.alpha)
+                dst.write(np.full((height, width), 200, dtype=np.uint8), 1)  # Blue = 200
+                dst.write(np.full((height, width), 100, dtype=np.uint8), 2)  # Green = 100
+                dst.write(np.full((height, width), 50, dtype=np.uint8), 3)   # Red = 50
+                dst.write(np.full((height, width), 255, dtype=np.uint8), 4)
+
+            raw_bytes = memfile.read()
+
+        img, geo_meta = process_geotiff(raw_bytes)
+        assert geo_meta is not None
+        assert geo_meta.band_resolution_tier == "colorinterp"
+        # In the output RGB image, Red channel should be 50, Green 100, Blue 200
+        arr = np.array(img)
+        assert arr[0, 0, 0] == 0 or arr[0, 0, 0] <= 128  # Red was band 3 (50)
+        assert arr[0, 0, 2] == 255 or arr[0, 0, 2] >= 128 # Blue was band 1 (200)
+
+    def test_tier2_band_descriptions_sentinel_names(self):
+        """Tier 2: Verify B04/B03/B02 band descriptions resolve correctly."""
+        width, height = 32, 32
+        transform = from_bounds(10.0, 40.0, 10.1, 40.1, width, height)
+
+        with rasterio.io.MemoryFile() as memfile:
+            with memfile.open(
+                driver="GTiff",
+                height=height,
+                width=width,
+                count=4,
+                dtype=np.uint8,
+                crs="EPSG:4326",
+                transform=transform,
+                photometric="MINISBLACK",
+            ) as dst:
+                dst.set_band_description(1, "B02 - Blue")
+                dst.set_band_description(2, "B03 - Green")
+                dst.set_band_description(3, "B04 - Red")
+                dst.set_band_description(4, "B08 - NIR")
+                for i in range(1, 5):
+                    dst.write(np.full((height, width), i * 50, dtype=np.uint8), i)
+
+            raw_bytes = memfile.read()
+
+        img, geo_meta = process_geotiff(raw_bytes)
+        assert geo_meta is not None
+        assert geo_meta.band_resolution_tier == "band_description_match"
+
+    def test_tier2_band_descriptions_case_tolerance(self):
+        """Tier 2: Verify case-insensitive red/green/blue descriptions resolve correctly."""
+        width, height = 32, 32
+        transform = from_bounds(10.0, 40.0, 10.1, 40.1, width, height)
+
+        with rasterio.io.MemoryFile() as memfile:
+            with memfile.open(
+                driver="GTiff",
+                height=height,
+                width=width,
+                count=3,
+                dtype=np.uint8,
+                crs="EPSG:4326",
+                transform=transform,
+                photometric="MINISBLACK",
+            ) as dst:
+                dst.set_band_description(1, "RED (Channel 1)")
+                dst.set_band_description(2, "GREEN (Channel 2)")
+                dst.set_band_description(3, "BLUE (Channel 3)")
+                for i in range(1, 4):
+                    dst.write(np.full((height, width), i * 60, dtype=np.uint8), i)
+
+            raw_bytes = memfile.read()
+
+        img, geo_meta = process_geotiff(raw_bytes)
+        assert geo_meta is not None
+        assert geo_meta.band_resolution_tier == "band_description_match"
+
+    def test_tier3_sentinel2_full_stack_heuristic(self):
+        """Tier 3: 12-band GeoTIFF with no tags triggers Sentinel-2 (4, 3, 2) mapping."""
+        width, height = 16, 16
+        transform = from_bounds(10.0, 40.0, 10.1, 40.1, width, height)
+
+        with rasterio.io.MemoryFile() as memfile:
+            with memfile.open(
+                driver="GTiff",
+                height=height,
+                width=width,
+                count=12,
+                dtype=np.uint8,
+                crs="EPSG:4326",
+                transform=transform,
+                photometric="MINISBLACK",
+            ) as dst:
+                for i in range(1, 13):
+                    dst.write(np.full((height, width), i * 15, dtype=np.uint8), i)
+
+            raw_bytes = memfile.read()
+
+        img, geo_meta = process_geotiff(raw_bytes)
+        assert geo_meta is not None
+        assert geo_meta.band_resolution_tier == "sentinel2_full_stack_heuristic"
+
+    def test_tier4_default_standard_stack(self):
+        """Tier 4: Standard 3/4-band GeoTIFF defaults to (1, 2, 3)."""
+        width, height = 16, 16
+        transform = from_bounds(10.0, 40.0, 10.1, 40.1, width, height)
+
+        with rasterio.io.MemoryFile() as memfile:
+            with memfile.open(
+                driver="GTiff",
+                height=height,
+                width=width,
+                count=4,
+                dtype=np.uint8,
+                crs="EPSG:4326",
+                transform=transform,
+                photometric="MINISBLACK",
+            ) as dst:
+                for i in range(1, 5):
+                    dst.write(np.full((height, width), i * 40, dtype=np.uint8), i)
+
+            raw_bytes = memfile.read()
+
+        img, geo_meta = process_geotiff(raw_bytes)
+        assert geo_meta is not None
+        assert geo_meta.band_resolution_tier == "default_123"

@@ -160,7 +160,7 @@ def run_detection(
     q_lower = query.lower()
 
     if mode == "auto":
-        if any(w in q_lower for w in ["highlight", "segment", "mask"]):
+        if any(w in q_lower for w in ["highlight", "segment", "mask", "boundary", "outline", "delineate", "water", "river", "lake", "flood", "ocean", "sea", "reservoir"]):
             resolved_mode = "mask"
         elif any(w in q_lower for w in ["where", "locate", "find", "box"]):
             resolved_mode = "bbox"

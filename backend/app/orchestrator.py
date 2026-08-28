@@ -348,10 +348,14 @@ def _assemble_response(
 ) -> QueryResponse:
     """Map an AI result dict to the API response shape with optional GeoTIFF coordinates."""
     meta = result["meta"]
+    params = dict(meta.get("parameters") or {})
+    if geo_meta and geo_meta.band_resolution_tier:
+        params["band_resolution_tier"] = geo_meta.band_resolution_tier
+
     execution_summary = ExecutionSummary(
         selected_task=task,
         tool_used=meta["tool_used"],
-        parameters=meta["parameters"],
+        parameters=params,
         inputs_validated=True,
         latency_ms=meta["latency_ms"],
     )

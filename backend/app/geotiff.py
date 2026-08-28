@@ -27,6 +27,25 @@ _TIFF_MAGIC = (
 )
 
 
+import re
+from dataclasses import dataclass
+import io
+import logging
+from typing import List, Optional, Tuple, Union
+import numpy as np
+from PIL import Image
+
+logger = logging.getLogger(__name__)
+
+# GeoTIFF magic byte signatures
+_TIFF_MAGIC = (
+    b"II*\x00",  # Little-endian TIFF
+    b"MM\x00*",  # Big-endian TIFF
+    b"II+\x00",  # Little-endian BigTIFF
+    b"MM\x00+",  # Big-endian BigTIFF
+)
+
+
 @dataclass
 class GeoMetadata:
     crs: str
@@ -35,6 +54,7 @@ class GeoMetadata:
     raw_size: Tuple[int, int]  # (width, height)
     scaled_size: Tuple[int, int]  # (width, height)
     scale_factor: Tuple[float, float]  # (scale_x, scale_y)
+    band_resolution_tier: Optional[str] = None
 
 
 def is_geotiff(data_bytes: bytes) -> bool:
@@ -67,11 +87,82 @@ def normalize_band_percentile(
         v_max = float(np.max(valid_vals))
 
     if v_max <= v_min:
+        if v_max > 0:
+            return np.clip(band_array, 0, 255).astype(np.uint8)
         return np.zeros_like(band_array, dtype=np.uint8)
 
     stretched = (band_array - v_min) / (v_max - v_min + 1e-6)
     stretched = np.clip(stretched, 0.0, 1.0) * 255.0
     return stretched.astype(np.uint8)
+
+
+def _resolve_rgb_bands(src) -> Tuple[Tuple[int, int, int], str]:
+    """
+    Dynamically identifies 1-based band indices (r, g, b) and logs the resolution tier:
+    Tier 1: src.colorinterp (ColorInterp.red, green, blue)
+    Tier 2: src.descriptions / src.tags() matching B04/B03/B02, B4/B3/B2, red/green/blue
+    Tier 3: Sentinel-2 Full Stack Heuristic (n_bands >= 12 -> 4, 3, 2)
+    Tier 4: Default for 3/4-band stacks -> (1, 2, 3)
+    """
+    n_bands = src.count
+    if n_bands < 3:
+        return ((1, 1, 1), "default_123")
+
+    # ── Tier 1: src.colorinterp ──────────────────────────────────────
+    try:
+        from rasterio.enums import ColorInterp
+        interps = list(src.colorinterp)
+        if ColorInterp.red in interps and ColorInterp.green in interps and ColorInterp.blue in interps:
+            r_idx = interps.index(ColorInterp.red) + 1
+            g_idx = interps.index(ColorInterp.green) + 1
+            b_idx = interps.index(ColorInterp.blue) + 1
+            logger.info("GeoTIFF band resolution [Tier 1: colorinterp] -> R:%d, G:%d, B:%d", r_idx, g_idx, b_idx)
+            return ((r_idx, g_idx, b_idx), "colorinterp")
+    except Exception as e:
+        logger.debug("ColorInterp inspection skipped: %s", e)
+
+    # ── Tier 2: src.descriptions / src.tags() ────────────────────────
+    try:
+        r_match = None
+        g_match = None
+        b_match = None
+
+        r_tokens = ("b04", "b4", "red", "band4", "band04")
+        g_tokens = ("b03", "b3", "green", "band3", "band03")
+        b_tokens = ("b02", "b2", "blue", "band2", "band02")
+
+        for i in range(1, n_bands + 1):
+            d = ""
+            if src.descriptions and len(src.descriptions) >= i and src.descriptions[i - 1]:
+                d = src.descriptions[i - 1]
+            else:
+                tags = src.tags(i)
+                d = tags.get("NAME") or tags.get("DESCRIPTION") or tags.get("BAND_NAME") or tags.get("color") or ""
+            clean_d = re.sub(r"[^a-z0-9]", "", d.lower())
+            if not clean_d:
+                continue
+
+            if not r_match and any(t in clean_d for t in r_tokens):
+                r_match = i
+            elif not g_match and any(t in clean_d for t in g_tokens):
+                g_match = i
+            elif not b_match and any(t in clean_d for t in b_tokens):
+                b_match = i
+
+        if r_match and g_match and b_match and len({r_match, g_match, b_match}) == 3:
+            logger.info("GeoTIFF band resolution [Tier 2: band_description_match] -> R:%d, G:%d, B:%d", r_match, g_match, b_match)
+            return ((r_match, g_match, b_match), "band_description_match")
+    except Exception as e:
+        logger.debug("Band description matching skipped: %s", e)
+
+    # ── Tier 3: Sentinel-2 Full Stack Heuristic (n_bands >= 12) ─────
+    if n_bands >= 12:
+        logger.info("GeoTIFF band resolution [Tier 3: sentinel2_full_stack_heuristic] -> R:4, G:3, B:2")
+        return ((4, 3, 2), "sentinel2_full_stack_heuristic")
+
+    # ── Tier 4: Default for 3/4-band stacks (standard RGB/RGBN/RGBA) ─
+    logger.info("GeoTIFF band resolution [Tier 4: default_123] -> R:1, G:2, B:3")
+    return ((1, 2, 3), "default_123")
 
 
 def process_geotiff(
@@ -99,12 +190,13 @@ def process_geotiff(
                 crs_obj = src.crs
                 transform = src.transform
 
-                # 1. Read bands
+                # 1. Read bands with dynamic resolution chain
+                band_resolution_tier = None
                 if n_bands >= 3:
-                    # True color RGB composite: Read bands 1, 2, 3 as R, G, B
-                    r = src.read(1)
-                    g = src.read(2)
-                    b = src.read(3)
+                    (r_idx, g_idx, b_idx), band_resolution_tier = _resolve_rgb_bands(src)
+                    r = src.read(r_idx)
+                    g = src.read(g_idx)
+                    b = src.read(b_idx)
 
                     r_u8 = normalize_band_percentile(r)
                     g_u8 = normalize_band_percentile(g)
@@ -122,12 +214,14 @@ def process_geotiff(
                     ratio_u8 = normalize_band_percentile(ratio)
                     rgb_array = np.stack([b1_u8, b2_u8, ratio_u8], axis=-1)
                     pil_img = Image.fromarray(rgb_array, mode="RGB")
+                    band_resolution_tier = "sar_dual_polarization"
 
                 else:
                     b1 = src.read(1)
                     b1_u8 = normalize_band_percentile(b1)
                     rgb_array = np.stack([b1_u8, b1_u8, b1_u8], axis=-1)
                     pil_img = Image.fromarray(rgb_array, mode="RGB")
+                    band_resolution_tier = "single_band_grayscale"
 
                 # 2. Extract Geospatial Coordinates
                 geo_meta = None
@@ -189,6 +283,7 @@ def process_geotiff(
                         raw_size=orig_size,
                         scaled_size=scaled_size,
                         scale_factor=(scale_x, scale_y),
+                        band_resolution_tier=band_resolution_tier,
                     )
 
                 return pil_img, geo_meta

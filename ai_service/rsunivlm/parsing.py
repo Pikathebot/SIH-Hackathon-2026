@@ -30,8 +30,12 @@ def extract_water_spectral_mask(image_pil: Image.Image) -> np.ndarray:
     blue_green_ratio = (B - G) / (B + G + eps)
     brightness = (R + G + B) / 3.0
 
-    # Water condition: positive blue-to-red contrast, non-vegetation green balance, low red reflectance
-    water_condition = (blue_ratio > 0.05) & (blue_green_ratio > -0.35) & (brightness < 0.65) & (R < 0.40)
+    # 1. Coastal / River / Shallow water: positive blue contrast, balanced green, low red
+    coastal_river_water = (blue_ratio > 0.04) & (blue_green_ratio > -0.35) & (brightness < 0.65) & (R < 0.40)
+    # 2. Deep ocean / dark calm water: low overall reflectance with blue dominating over red
+    deep_dark_water = (brightness < 0.25) & (R < 0.18) & (B >= R - 0.03)
+
+    water_condition = coastal_river_water | deep_dark_water
 
     mask = np.zeros((image_pil.height, image_pil.width), dtype=np.uint8)
     mask[water_condition] = 255

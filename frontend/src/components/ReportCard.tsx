@@ -113,7 +113,7 @@ export const ReportCard: React.FC<ReportCardProps> = ({
             </div>
             
             <CoordinateTickFrame
-              imageUrl={primaryImage?.url_or_base64 || primaryImage?.previewUrl}
+              imageUrl={primaryImage?.previewUrl || (primaryImage?.url_or_base64?.startsWith('data:image/tiff') ? undefined : primaryImage?.url_or_base64)}
               visualEvidence={response.visual_evidence}
               modality={primaryImage?.modality}
               date={primaryImage?.date}
@@ -126,7 +126,7 @@ export const ReportCard: React.FC<ReportCardProps> = ({
             {primaryImage && (
               <div className="flex-1">
                 <CoordinateTickFrame
-                  imageUrl={primaryImage.url_or_base64 || primaryImage.previewUrl}
+                  imageUrl={primaryImage.previewUrl || (primaryImage.url_or_base64?.startsWith('data:image/tiff') ? undefined : primaryImage.url_or_base64)}
                   modality={primaryImage.modality}
                   date={primaryImage.date}
                   caption={primaryImage.name || 'Input Imagery'}
@@ -136,7 +136,7 @@ export const ReportCard: React.FC<ReportCardProps> = ({
             {secondaryImage && (
               <div className="flex-1">
                 <CoordinateTickFrame
-                  imageUrl={secondaryImage.url_or_base64 || secondaryImage.previewUrl}
+                  imageUrl={secondaryImage.previewUrl || (secondaryImage.url_or_base64?.startsWith('data:image/tiff') ? undefined : secondaryImage.url_or_base64)}
                   modality={secondaryImage.modality}
                   date={secondaryImage.date}
                   caption={secondaryImage.name || 'Comparison Imagery'}
