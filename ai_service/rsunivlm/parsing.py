@@ -43,28 +43,26 @@ def extract_water_spectral_mask(image_pil: Image.Image) -> np.ndarray:
     else:
         # Normalized Difference Water Index (NDWI proxy: Blue - Red) and Blue-Green ratio
         blue_ratio = (B - R) / (B + R + eps)
-        blue_green_ratio = (B - G) / (B + G + eps)
 
         # 1. Coastal / River / Shallow water: clear blue/cyan dominance, low red, positive blue-to-red contrast
         coastal_river_water = (
-            (blue_ratio > 0.06) &
-            (blue_green_ratio > -0.30) &
+            (blue_ratio > 0.04) &
             (brightness < 0.60) &
-            (R < 0.25) &
-            (B > R)
+            (R < 0.35) &
+            (B > R) &
+            (G < B + 0.08)
         )
 
-        # 2. Deep ocean / clear dark water: tightly constrained against terrestrial shadows & asphalt:
-        deep_dark_water = (
-            (brightness < 0.16) &
-            (R < 0.08) &
-            (B > R + 0.01) &
-            (G >= R) &
-            (spread < 0.08) &
-            (blue_ratio > 0.10)
+        # 2. Deep ocean / marine water: low to moderate brightness with Blue >= Red, low red reflectance, and no vegetation green peak
+        ocean_marine_water = (
+            (B >= R - 0.01) &
+            (brightness < 0.36) &
+            (R < 0.33) &
+            (spread < 0.12) &
+            (G < B + 0.05)
         )
 
-        water_condition = coastal_river_water | deep_dark_water
+        water_condition = coastal_river_water | ocean_marine_water
 
     mask = np.zeros((image_pil.height, image_pil.width), dtype=np.uint8)
     mask[water_condition] = 255
@@ -91,42 +89,48 @@ def parse_segmentation_output(
     output_string: str,
     img_size: Tuple[int, int],
     target_label: Optional[str] = None,
-    patch_size: int = 20,
+    grid_size: Tuple[int, int] = (24, 24),
 ) -> Tuple[Optional[np.ndarray], set]:
     """
     Parses tokenized segmentation output into a 2D binary uint8 mask (0 or 255).
+    Robustly handles space-delimited or comma-delimited patch sequences formatted as `<label> * <count>`.
     """
-    output_string = output_string.lower().strip()
+    output_string = output_string.lower().replace("\n", " ").strip()
     try:
-        labels = set(re.findall(r"\b[a-z]+(?: [a-z]+)*\b", output_string))
-        rows = output_string.split("\n")
-        parsed_mask = []
-        for row in rows:
-            row_data = []
-            patches = row.split(", ")
-            for patch in patches:
-                if "*" in patch:
-                    parts = patch.strip().split("*")
-                    if len(parts) == 2:
-                        label, count = parts[0].strip(), int(parts[1].strip())
-                        row_data.extend([label] * count)
-            if row_data:
-                parsed_mask.append(row_data)
+        pattern = r"([a-z\s]+?)\s*\*\s*(\d+)"
+        matches = re.findall(pattern, output_string)
 
-        if not parsed_mask:
-            return None, labels
+        flat_patches = []
+        labels = set()
+        for label_raw, count_str in matches:
+            label = label_raw.strip(" ,;")
+            try:
+                count = int(count_str)
+            except ValueError:
+                continue
+            if label and label != "others":
+                labels.add(label)
+            flat_patches.extend([label] * count)
 
-        parsed_mask_np = np.array(parsed_mask)
-        height, width = parsed_mask_np.shape
+        if not flat_patches:
+            return None, set()
 
-        binary_mask = np.zeros((height * patch_size, width * patch_size), dtype=np.uint8)
-        for i in range(height):
-            for j in range(width):
-                val = parsed_mask_np[i, j].strip()
+        total_needed = grid_size[0] * grid_size[1]
+        if len(flat_patches) < total_needed:
+            flat_patches.extend(["others"] * (total_needed - len(flat_patches)))
+        else:
+            flat_patches = flat_patches[:total_needed]
+
+        grid = np.array(flat_patches).reshape(grid_size)
+
+        binary_grid = np.zeros(grid_size, dtype=np.uint8)
+        for r in range(grid_size[0]):
+            for c in range(grid_size[1]):
+                val = grid[r, c]
                 if val != "others" and (target_label is None or target_label in val or val in target_label):
-                    binary_mask[i * patch_size : (i + 1) * patch_size, j * patch_size : (j + 1) * patch_size] = 255
+                    binary_grid[r, c] = 255
 
-        binary_mask = cv2.resize(binary_mask, (img_size[0], img_size[1]), interpolation=cv2.INTER_NEAREST)
+        binary_mask = cv2.resize(binary_grid, (img_size[0], img_size[1]), interpolation=cv2.INTER_NEAREST)
         return binary_mask, labels
     except Exception as e:
         print(f"Error parsing segmentation mask tokens: {e}", file=sys.stderr)

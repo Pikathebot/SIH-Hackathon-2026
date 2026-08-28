@@ -161,11 +161,14 @@ def run_detection(
 
     q_lower = query.lower()
 
+    q_lower = query.lower()
+
     if mode == "auto":
         if any(w in q_lower for w in [
-            "highlight", "segment", "mask", "boundary", "outline", "delineate",
-            "water", "river", "lake", "flood", "ocean", "sea", "reservoir",
-            "coast", "coastline", "coastal", "shore", "shoreline", "waterline", "land-water"
+            "highlight", "segment", "mask", "boundary", "outline", "delineate", "extent", "coverage",
+            "water", "river", "lake", "flood", "ocean", "sea", "reservoir", "waterbody", "stream",
+            "coast", "coastline", "coastal", "shore", "shoreline", "waterline", "land-water",
+            "landmass", "land mass", "land", "terrain", "ground", "vegetation", "forest", "urban", "city", "built-up"
         ]):
             resolved_mode = "mask"
         elif any(w in q_lower for w in ["where", "locate", "find", "box"]):
@@ -227,14 +230,22 @@ def run_detection(
             max_new_tokens=512,
         )
 
+        is_landmass_query = any(w in q_lower for w in ["landmass", "land mass", "land", "terrain", "ground"])
         is_coastline_query = any(w in q_lower for w in ["coast", "coastline", "coastal", "shore", "shoreline", "waterline", "land-water"])
-        is_water_query = is_coastline_query or any(w in q_lower for w in ["water", "river", "lake", "flood", "reservoir", "ocean", "sea", "stream"])
+        is_water_query = any(w in q_lower for w in ["water", "river", "lake", "flood", "reservoir", "ocean", "sea", "stream"])
         binary_mask, labels = parse_segmentation_output(text_out, image.size)
 
-        # Enhance with spectral NDWI/NIR mask for water body & coastline queries
-        if is_water_query:
+        # Enhance with spectral NDWI/NIR mask for water body, coastline, & landmass queries
+        if is_landmass_query or is_coastline_query or is_water_query:
             spectral_water = extract_water_spectral_mask(image)
-            if is_coastline_query:
+            if is_landmass_query:
+                spectral_land = cv2.bitwise_not(spectral_water)
+                if binary_mask is not None:
+                    binary_mask = cv2.bitwise_or(binary_mask, spectral_land)
+                else:
+                    binary_mask = spectral_land
+                labels.add("landmass")
+            elif is_coastline_query:
                 coast_contour = extract_coastline_contour(spectral_water, thickness=3)
                 if binary_mask is not None:
                     binary_mask = cv2.bitwise_or(binary_mask, coast_contour)
@@ -249,8 +260,13 @@ def run_detection(
                 labels.add("water")
 
         if binary_mask is not None and np.any(binary_mask > 0):
-            overlay_color = (0, 240, 255) if is_coastline_query else (0, 120, 255)
-            overlay_pil = create_overlay_image(image, binary_mask, color=overlay_color, alpha=0.6 if is_coastline_query else 0.5)
+            if is_landmass_query:
+                overlay_color = (0, 220, 100) # Emerald/green tint for land
+            elif is_coastline_query:
+                overlay_color = (0, 240, 255) # Bright cyan for coastline
+            else:
+                overlay_color = (0, 120, 255) # Blue for water
+            overlay_pil = create_overlay_image(image, binary_mask, color=overlay_color, alpha=0.5)
             mask_b64 = mask_to_base64(binary_mask)
             overlay_b64 = image_to_base64(overlay_pil)
         else:
@@ -259,7 +275,7 @@ def run_detection(
             mask_b64 = mask_to_base64(empty_mask)
             overlay_b64 = image_to_base64(image)
 
-        conf = round(logit_conf, 2) if logit_conf is not None else (0.86 if is_water_query else 0.75)
+        conf = round(logit_conf, 2) if logit_conf is not None else (0.88 if (is_landmass_query or is_water_query or is_coastline_query) else 0.75)
         conf_source = "model_softmax" if logit_conf is not None else "heuristic"
 
         return {

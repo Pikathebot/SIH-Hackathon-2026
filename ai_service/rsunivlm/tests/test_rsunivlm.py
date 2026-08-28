@@ -145,6 +145,12 @@ class TestRSUniVLMDetection:
         assert result["meta"]["tool_used"] == "rsunivlm_seg"
         assert result["mask_base64"] is not None
 
+    def test_run_detection_auto_routing_landmass(self, sample_optical_image):
+        result = run_detection(sample_optical_image, "Detect landmass in this scene", mode="auto")
+        assert result["mode"] == "mask"
+        assert result["meta"]["tool_used"] == "rsunivlm_seg"
+        assert result["mask_base64"] is not None
+
 
 # ── Change Detection Tests ────────────────────────────────────────────────
 class TestRSUniVLMChangeDetection:
