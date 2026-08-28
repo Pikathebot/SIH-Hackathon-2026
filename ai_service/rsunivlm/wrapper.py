@@ -24,6 +24,8 @@ from ai_service.rsunivlm.inference import (
     parse_bounding_boxes,
     create_overlay_image,
     extract_water_spectral_mask,
+    extract_coastline_contour,
+    clean_vlm_text_output,
     image_to_base64,
     mask_to_base64,
 )
