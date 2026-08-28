@@ -19,6 +19,7 @@ from ai_service.common.types import (
     ExecutionMeta,
 )
 from ai_service.common.errors import AIServiceError, MODEL_INFERENCE_FAILED
+from ai_service.rsunivlm.parsing import resolve_detection_mode
 
 
 def _get_dummy_png_base64(color=(255, 0, 0, 128), size=(128, 128)) -> str:
@@ -120,23 +121,7 @@ def run_detection(
             message="Invalid image input: expected PIL.Image.Image instance",
         )
 
-    q_lower = query.lower()
-
-    # Route mode
-    if mode == "auto":
-        if any(w in q_lower for w in [
-            "highlight", "segment", "mask", "boundary", "outline", "delineate", "extent", "coverage",
-            "water", "river", "lake", "flood", "ocean", "sea", "reservoir", "waterbody", "stream",
-            "coast", "coastline", "coastal", "shore", "shoreline", "waterline", "land-water",
-            "landmass", "land mass", "land", "terrain", "ground", "vegetation", "forest", "urban", "city", "built-up"
-        ]):
-            resolved_mode = "mask"
-        elif any(w in q_lower for w in ["where", "locate", "find", "box"]):
-            resolved_mode = "bbox"
-        else:
-            resolved_mode = "bbox"
-    else:
-        resolved_mode = mode
+    resolved_mode = resolve_detection_mode(query, mode=mode)
 
     start = time.time()
 

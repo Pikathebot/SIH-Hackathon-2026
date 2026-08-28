@@ -166,28 +166,103 @@ def test_mock_captioning(sample_image):
     assert_captioning_result(result)
 
 
-def test_mock_detection_auto_bbox(sample_image):
+from unittest.mock import patch, MagicMock
+from ai_service.rsunivlm.parsing import resolve_detection_mode
+
+
+# ── Shared Detection Routing Logic Tests ──────────────────────────────
+
+@pytest.mark.parametrize(
+    "query, expected_mode",
+    [
+        # Precedence regression cases: localization actions beat subject keywords
+        ("Where is the water body?", "bbox"),
+        ("Locate the flooded coastal area", "bbox"),
+        ("Find the urban built-up region", "bbox"),
+        ("Where is the forest boundary?", "bbox"),
+        ("Locate building coordinates", "bbox"),
+        ("Find all ships in the harbor", "bbox"),
+        ("Where is the aircraft runway?", "bbox"),
+        ("Box the target object", "bbox"),
+        # Mask / segmentation / continuous features without localization actions
+        ("Highlight the water bodies in this image", "mask"),
+        ("Segment the river network", "mask"),
+        ("Detect coastal lines in this image", "mask"),
+        ("Detect landmass in this scene", "mask"),
+        ("Delineate the forest boundary", "mask"),
+        ("Highlight flood inundation zones", "mask"),
+        ("Map urban built-up coverage", "mask"),
+        ("Show lake extent", "mask"),
+        ("Detect shoreline", "mask"),
+        # Default fast path (discrete targets without localization keywords)
+        ("Detect airplanes", "bbox"),
+        ("Count cargo ships", "bbox"),
+        ("Identify vehicles", "bbox"),
+    ],
+)
+def test_resolve_detection_mode_auto(query: str, expected_mode: str):
+    """Direct unit tests for resolve_detection_mode per AI_SERVICE_CONTRACT.md §2."""
+    assert resolve_detection_mode(query, mode="auto") == expected_mode
+
+
+@pytest.mark.parametrize("explicit_mode", ["bbox", "mask"])
+def test_resolve_detection_mode_explicit(explicit_mode: str):
+    """Explicit mode overrides all query keyword heuristics."""
+    assert resolve_detection_mode("Highlight water bodies", mode=explicit_mode) == explicit_mode
+    assert resolve_detection_mode("Where is the aircraft?", mode=explicit_mode) == explicit_mode
+
+
+def _run_detection_target(target: str, image: Image.Image, query: str, mode: str = "auto") -> dict:
+    """Helper to execute run_detection against either rsunivlm.mock or rsunivlm.wrapper."""
+    if target == "mock":
+        return rsunivlm_mock.run_detection(image, query, mode=mode)
+    elif target == "wrapper":
+        from ai_service.rsunivlm.wrapper import run_detection as wrapper_run_detection
+        with patch("ai_service.rsunivlm.wrapper._get_model", return_value=(MagicMock(), MagicMock(), MagicMock())):
+            with patch("ai_service.rsunivlm.wrapper.run_raw_inference") as mock_infer:
+                mock_infer.side_effect = lambda model, tokenizer, image_processor, images, message, max_new_tokens: (
+                    ("Found target at [10, 20, 50, 60]", 50, 0.85)
+                    if message.startswith("[VG]")
+                    else ("others *10, water *20, others *546", 100, 0.90)
+                )
+                return wrapper_run_detection(image, query, mode=mode)
+    raise ValueError(f"Unknown detection target: {target}")
+
+
+@pytest.mark.parametrize("target", ["mock", "wrapper"])
+def test_detection_auto_bbox(sample_image, target: str):
     # Where query -> auto routes to bbox
-    result = rsunivlm_mock.run_detection(sample_image, "Where is the water body?", mode="auto")
+    result = _run_detection_target(target, sample_image, "Where is the aircraft?", mode="auto")
     assert_detection_result(result, expected_mode="bbox")
     assert result["boxes"] is not None
     assert result["mask_base64"] is None
 
 
-def test_mock_detection_auto_mask(sample_image):
+@pytest.mark.parametrize("target", ["mock", "wrapper"])
+def test_detection_auto_mask(sample_image, target: str):
     # Highlight query -> auto routes to mask
-    result = rsunivlm_mock.run_detection(sample_image, "Highlight the water bodies in this image", mode="auto")
+    result = _run_detection_target(target, sample_image, "Highlight the water bodies in this image", mode="auto")
     assert_detection_result(result, expected_mode="mask")
     assert result["boxes"] is None
     assert result["mask_base64"] is not None
     assert result["overlay_base64"] is not None
 
 
-def test_mock_detection_explicit_modes(sample_image):
-    bbox_res = rsunivlm_mock.run_detection(sample_image, "arbitrary query", mode="bbox")
+@pytest.mark.parametrize("target", ["mock", "wrapper"])
+def test_detection_auto_where_beats_subject_keyword(sample_image, target: str):
+    # Precedence: 'Where is the water body?' has 'where' which must beat 'water'
+    result = _run_detection_target(target, sample_image, "Where is the water body?", mode="auto")
+    assert_detection_result(result, expected_mode="bbox")
+    assert result["boxes"] is not None
+    assert result["mask_base64"] is None
+
+
+@pytest.mark.parametrize("target", ["mock", "wrapper"])
+def test_detection_explicit_modes(sample_image, target: str):
+    bbox_res = _run_detection_target(target, sample_image, "arbitrary query", mode="bbox")
     assert_detection_result(bbox_res, expected_mode="bbox")
 
-    mask_res = rsunivlm_mock.run_detection(sample_image, "arbitrary query", mode="mask")
+    mask_res = _run_detection_target(target, sample_image, "arbitrary query", mode="mask")
     assert_detection_result(mask_res, expected_mode="mask")
 
 
