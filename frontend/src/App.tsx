@@ -132,12 +132,23 @@ const WorkspaceMain: React.FC = () => {
     const timestamp =
       new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' UTC';
 
+    // Free massive multi-megabyte raw TIFF data from persistent React chat history state.
+    // Chat history only requires lightweight web-displayable preview thumbnails (~80 KB PNGs).
+    const displayImages: QueryImage[] = attachedImages.map((img) => {
+      const lightweightUrl = img.previewUrl || (isBrowserRenderable(img.url_or_base64) && img.url_or_base64.length < 500000 ? img.url_or_base64 : undefined);
+      return {
+        ...img,
+        url_or_base64: lightweightUrl || '',
+        previewUrl: lightweightUrl,
+      };
+    });
+
     const userMsg: ChatMessage = {
       id: `usr_${Date.now()}`,
       sender: 'user',
       timestamp,
       query: queryText,
-      images: attachedImages,
+      images: displayImages,
     };
 
     setSessionMessages((prev) => ({
