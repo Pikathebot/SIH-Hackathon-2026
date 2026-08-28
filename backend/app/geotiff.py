@@ -101,19 +101,10 @@ def process_geotiff(
 
                 # 1. Read bands
                 if n_bands >= 3:
-                    if n_bands >= 4:
-                        try:
-                            r = src.read(4)
-                            g = src.read(3)
-                            b = src.read(2)
-                        except IndexError:
-                            r = src.read(1)
-                            g = src.read(2)
-                            b = src.read(3)
-                    else:
-                        r = src.read(1)
-                        g = src.read(2)
-                        b = src.read(3)
+                    # True color RGB composite: Read bands 1, 2, 3 as R, G, B
+                    r = src.read(1)
+                    g = src.read(2)
+                    b = src.read(3)
 
                     r_u8 = normalize_band_percentile(r)
                     g_u8 = normalize_band_percentile(g)

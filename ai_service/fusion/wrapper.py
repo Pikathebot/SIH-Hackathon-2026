@@ -93,8 +93,8 @@ def run_fusion(
         ndwi = (G - R) / (G + R + eps)
         brightness = (R + G + B) / 3.0
 
-        opt_veg_mask = (green_index > 0.06) & (brightness > 0.15)
-        opt_water_mask = ((water_index > 0.03) | (ndwi > 0.05)) & (brightness < 0.55) & (R < 0.45)
+        opt_veg_mask = (green_index > 0.04) & (G > B) & (brightness > 0.12)
+        opt_water_mask = (water_index > 0.05) & (B >= G - 0.05) & (brightness < 0.60) & (R < 0.45)
 
         # ── 2. SAR Radar Backscatter Analysis ────────────────────────
         # High backscatter (> 0.60): Double-bounce corner reflectors (built-up, concrete, metal)
@@ -122,8 +122,8 @@ def run_fusion(
         # 0: Water (Blue), 1: Vegetation (Green), 2: Built-up (Red)
         classified_map = np.zeros((target_size[1], target_size[0], 3), dtype=np.uint8)
 
-        # Fused Water: both optical water and SAR specular agree OR strong spectral water/radar absorption
-        fused_water = (opt_water_mask & sar_specular_water) | (opt_water_mask & (sar_np < 0.25)) | (water_index > 0.12)
+        # Fused Water: optical water confirmed by SAR low specular reflection or strong absorption
+        fused_water = (opt_water_mask & (sar_np < 0.30)) | (opt_water_mask & sar_specular_water)
         # Morphological smoothing for river connectivity
         kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
         fused_water = cv2.morphologyEx(fused_water.astype(np.uint8), cv2.MORPH_CLOSE, kernel).astype(bool)
