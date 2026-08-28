@@ -2,7 +2,9 @@ import React from 'react';
 import { QueryResponse, QueryImage } from '../types/contract';
 import { CoordinateTickFrame } from './CoordinateTickFrame';
 import { ExecutionSummaryPanel } from './ExecutionSummaryPanel';
+import { DualImageSplitSlider } from './DualImageSplitSlider';
 import { isBrowserRenderable } from '../services/api';
+import { exportGeoJSON, exportReportJSON, exportMissionPDF } from '../utils/reportExport';
 import { 
   Radar, 
   Scan, 
@@ -10,7 +12,10 @@ import {
   GitCompare, 
   Sparkles, 
   ShieldCheck, 
-  AlertTriangle 
+  AlertTriangle,
+  FileDown,
+  Compass,
+  FileCode
 } from 'lucide-react';
 
 interface ReportCardProps {
@@ -74,12 +79,16 @@ export const ReportCard: React.FC<ReportCardProps> = ({
     return undefined;
   };
 
+  const safePrimaryUrl = getSafeImageUrl(primaryImage);
+  const safeSecondaryUrl = getSafeImageUrl(secondaryImage);
+
   const hasVisualEvidence = response.visual_evidence && response.visual_evidence.type !== 'none';
+  const hasGeospatialData = Boolean(response.visual_evidence?.geospatial?.image_bounds);
 
   return (
     <div className="w-full bg-surface-panel border border-grid-hairline shadow-md relative rounded-2xl overflow-hidden transition-all">
       {/* Header Bar */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-grid-hairline bg-surface-container/60">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-6 py-4 border-b border-grid-hairline bg-surface-container/60">
         <div className="flex items-center gap-3">
           <div className="p-2 bg-surface-variant/70 border border-grid-hairline rounded-xl shadow-xs">
             {getTaskIcon(response.task)}
@@ -92,20 +101,57 @@ export const ReportCard: React.FC<ReportCardProps> = ({
           </div>
         </div>
 
-        {/* Confidence Badge */}
-        <div
-          className={`flex items-center gap-1.5 px-3 py-1.5 border text-xs font-medium rounded-full ${
-            isHighConfidence
-              ? 'bg-amber-signal/10 border-amber-signal/40 text-amber-signal'
-              : 'bg-red-delta/10 border-red-delta/40 text-red-delta'
-          }`}
-        >
-          {isHighConfidence ? (
-            <ShieldCheck className="w-4 h-4" />
-          ) : (
-            <AlertTriangle className="w-4 h-4" />
-          )}
-          <span>{confidencePercent}% Confidence</span>
+        {/* Right Controls: Confidence & Export Action Group */}
+        <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+          {/* Confidence Badge */}
+          <div
+            className={`flex items-center gap-1.5 px-3 py-1.5 border text-xs font-medium rounded-full ${
+              isHighConfidence
+                ? 'bg-amber-signal/10 border-amber-signal/40 text-amber-signal'
+                : 'bg-red-delta/10 border-red-delta/40 text-red-delta'
+            }`}
+          >
+            {isHighConfidence ? (
+              <ShieldCheck className="w-4 h-4" />
+            ) : (
+              <AlertTriangle className="w-4 h-4" />
+            )}
+            <span>{confidencePercent}% Confidence</span>
+          </div>
+
+          {/* Export Action Buttons */}
+          <div className="flex items-center gap-1 bg-surface-variant/70 border border-grid-hairline p-1 rounded-xl shadow-xs">
+            <button
+              type="button"
+              onClick={() => exportMissionPDF(response, sourceImages, timestamp)}
+              className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-text-primary hover:text-primary hover:bg-surface-container rounded-lg transition-colors cursor-pointer"
+              title="Download print-ready PDF Mission Analysis Report"
+            >
+              <FileDown className="w-3.5 h-3.5 text-primary" />
+              <span>PDF Report</span>
+            </button>
+
+            {hasGeospatialData && (
+              <button
+                type="button"
+                onClick={() => exportGeoJSON(response, sourceImages)}
+                className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-cyan-detection hover:bg-cyan-detection/10 rounded-lg transition-colors cursor-pointer"
+                title="Export WGS84 GeoJSON layer for QGIS / ArcGIS"
+              >
+                <Compass className="w-3.5 h-3.5" />
+                <span>GeoJSON</span>
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={() => exportReportJSON(response, sourceImages)}
+              className="p-1.5 text-text-muted hover:text-text-primary hover:bg-surface-container rounded-lg transition-colors cursor-pointer"
+              title="Export Machine-Readable JSON Analysis"
+            >
+              <FileCode className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
       </div>
 
@@ -127,6 +173,31 @@ export const ReportCard: React.FC<ReportCardProps> = ({
           </div>
         )}
 
+        {/* Multi-Image Interactive Split Slider (For Change Detection & Fusion) */}
+        {sourceImages.length === 2 && safePrimaryUrl && safeSecondaryUrl && (
+          <div className="flex flex-col gap-3">
+            <div className="text-xs font-semibold text-text-muted uppercase tracking-wider flex items-center gap-2">
+              <GitCompare className="w-4 h-4 text-primary" />
+              <span>Multi-Observation Synchronized Comparison</span>
+            </div>
+
+            <DualImageSplitSlider
+              primaryUrl={safePrimaryUrl}
+              secondaryUrl={safeSecondaryUrl}
+              primaryLabel={primaryImage?.name ? `${primaryImage.name} (${primaryImage.modality || 'T1'})` : 'Capture T1 (Optical)'}
+              secondaryLabel={secondaryImage?.name ? `${secondaryImage.name} (${secondaryImage.modality || 'T2'})` : 'Capture T2 (Comparison)'}
+              overlayUrl={
+                response.visual_evidence?.mask_base64
+                  ? response.visual_evidence.mask_base64.startsWith('data:')
+                    ? response.visual_evidence.mask_base64
+                    : `data:image/png;base64,${response.visual_evidence.mask_base64}`
+                  : undefined
+              }
+              task={response.task}
+            />
+          </div>
+        )}
+
         {/* Visual Evidence Viewports */}
         {hasVisualEvidence ? (
           <div className="flex flex-col gap-3">
@@ -136,36 +207,22 @@ export const ReportCard: React.FC<ReportCardProps> = ({
             </div>
             
             <CoordinateTickFrame
-              imageUrl={getSafeImageUrl(primaryImage)}
+              imageUrl={safePrimaryUrl}
               visualEvidence={response.visual_evidence}
               modality={primaryImage?.modality}
               date={primaryImage?.date}
               caption={primaryImage?.name || 'Satellite Imagery Viewport'}
             />
           </div>
-        ) : sourceImages.length > 0 ? (
-          /* Plain image display for VQA/Captioning */
-          <div className="flex flex-col sm:flex-row gap-4">
-            {primaryImage && (
-              <div className="flex-1">
-                <CoordinateTickFrame
-                  imageUrl={getSafeImageUrl(primaryImage)}
-                  modality={primaryImage.modality}
-                  date={primaryImage.date}
-                  caption={primaryImage.name || 'Input Imagery'}
-                />
-              </div>
-            )}
-            {secondaryImage && (
-              <div className="flex-1">
-                <CoordinateTickFrame
-                  imageUrl={getSafeImageUrl(secondaryImage)}
-                  modality={secondaryImage.modality}
-                  date={secondaryImage.date}
-                  caption={secondaryImage.name || 'Comparison Imagery'}
-                />
-              </div>
-            )}
+        ) : sourceImages.length === 1 && safePrimaryUrl ? (
+          /* Plain image display for single-image VQA/Captioning */
+          <div className="flex flex-col gap-3">
+            <CoordinateTickFrame
+              imageUrl={safePrimaryUrl}
+              modality={primaryImage?.modality}
+              date={primaryImage?.date}
+              caption={primaryImage?.name || 'Input Imagery'}
+            />
           </div>
         ) : null}
       </div>
