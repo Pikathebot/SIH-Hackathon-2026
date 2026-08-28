@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { submitQuery, generatePreview } from '../services/api';
+import { submitQuery, generatePreview, isBrowserRenderable } from '../services/api';
 import { QueryImage, QueryResponse } from '../types/contract';
 import { ExecutionSummaryPanel } from './ExecutionSummaryPanel';
 import {
@@ -24,46 +24,50 @@ interface GeoPreset {
   category: string;
   lat: number;
   lon: number;
-  defaultQuery: string;
   imageUrl: string;
+  defaultQuery: string;
 }
 
 const GEO_PRESETS: GeoPreset[] = [
   {
-    id: 'airfield',
-    name: 'Military Airbase',
-    category: 'Aviation',
-    lat: 34.0522,
-    lon: -118.2437,
-    defaultQuery: 'Detect all military and civilian aircraft on the runway and tarmac',
-    imageUrl: 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?q=80&w=1200&auto=format&fit=crop',
+    id: 'port_rotterdam',
+    name: 'Port of Rotterdam',
+    category: 'Maritime / Logistics',
+    lat: 51.9542,
+    lon: 4.1456,
+    imageUrl:
+      'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?q=80&w=1200&auto=format&fit=crop',
+    defaultQuery: 'Detect all shipping vessels, cargo barges, and container cranes.',
   },
   {
-    id: 'harbor',
-    name: 'Shipping Terminal',
-    category: 'Maritime',
-    lat: 37.7749,
-    lon: -122.4194,
-    defaultQuery: 'Detect all cargo ships, tankers, and vessels docked or anchored in the harbor',
-    imageUrl: 'https://images.unsplash.com/photo-1508873696983-2df5293cb32f?q=80&w=1200&auto=format&fit=crop',
+    id: 'suez_canal',
+    name: 'Suez Canal Convoy Zone',
+    category: 'Critical Bottleneck',
+    lat: 30.7050,
+    lon: 32.3444,
+    imageUrl:
+      'https://images.unsplash.com/photo-1508873696983-2df5293cb32f?q=80&w=1200&auto=format&fit=crop',
+    defaultQuery: 'Identify transit container ships and water vessel bounds.',
   },
   {
-    id: 'reservoir',
-    name: 'Coastal Reservoir',
-    category: 'Hydrology',
-    lat: 25.2048,
-    lon: 55.2708,
-    defaultQuery: 'Locate and highlight all water reservoirs, lakes, and drainage channels',
-    imageUrl: 'https://images.unsplash.com/photo-1524661135-423995f22d0b?q=80&w=1200&auto=format&fit=crop',
+    id: 'dubai_airbase',
+    name: 'Al Maktoum Apron',
+    category: 'Aviation Infrastructure',
+    lat: 24.8967,
+    lon: 55.1614,
+    imageUrl:
+      'https://images.unsplash.com/photo-1541185933-ef5d8ed016c2?q=80&w=1200&auto=format&fit=crop',
+    defaultQuery: 'Locate commercial aircraft, hangars, and tarmac support vehicles.',
   },
   {
-    id: 'industrial',
-    name: 'Energy & Storage Complex',
-    category: 'Infrastructure',
-    lat: 29.9792,
-    lon: 31.1342,
-    defaultQuery: 'Detect all oil storage tanks, chemical silos, and industrial buildings',
-    imageUrl: 'https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?q=80&w=1200&auto=format&fit=crop',
+    id: 'tokyo_bay',
+    name: 'Tokyo Bay Industrial Coast',
+    category: 'Urban Coastal',
+    lat: 35.5300,
+    lon: 139.7800,
+    imageUrl:
+      'https://images.unsplash.com/photo-1524661135-423995f22d0b?q=80&w=1200&auto=format&fit=crop',
+    defaultQuery: 'Map coastal industrial facilities, docks, and maritime traffic.',
   },
 ];
 
@@ -103,7 +107,7 @@ export const MapDetectionWorkspace: React.FC = () => {
     reader.onload = async (ev) => {
       const base64 = ev.target?.result as string;
       setCustomRawPayload(base64);
-      setCustomImage(base64);
+      setCustomImage(isBrowserRenderable(base64) ? base64 : null);
       setResult(null);
       setErrorMsg(null);
 
@@ -113,7 +117,7 @@ export const MapDetectionWorkspace: React.FC = () => {
           setCustomImage(previewRes.preview_base64);
         }
       } catch {
-        // Fallback to original base64
+        // Fallback
       }
     };
     reader.readAsDataURL(file);

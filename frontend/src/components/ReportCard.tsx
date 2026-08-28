@@ -2,6 +2,7 @@ import React from 'react';
 import { QueryResponse, QueryImage } from '../types/contract';
 import { CoordinateTickFrame } from './CoordinateTickFrame';
 import { ExecutionSummaryPanel } from './ExecutionSummaryPanel';
+import { isBrowserRenderable } from '../services/api';
 import { 
   Radar, 
   Scan, 
@@ -61,6 +62,17 @@ export const ReportCard: React.FC<ReportCardProps> = ({
 
   const primaryImage = sourceImages[0];
   const secondaryImage = sourceImages[1];
+
+  const getSafeImageUrl = (img?: QueryImage): string | undefined => {
+    if (!img) return undefined;
+    if (img.previewUrl && isBrowserRenderable(img.previewUrl)) {
+      return img.previewUrl;
+    }
+    if (img.url_or_base64 && isBrowserRenderable(img.url_or_base64)) {
+      return img.url_or_base64;
+    }
+    return undefined;
+  };
 
   const hasVisualEvidence = response.visual_evidence && response.visual_evidence.type !== 'none';
 
@@ -124,7 +136,7 @@ export const ReportCard: React.FC<ReportCardProps> = ({
             </div>
             
             <CoordinateTickFrame
-              imageUrl={primaryImage?.previewUrl || (primaryImage?.url_or_base64?.startsWith('data:image/tiff') ? undefined : primaryImage?.url_or_base64)}
+              imageUrl={getSafeImageUrl(primaryImage)}
               visualEvidence={response.visual_evidence}
               modality={primaryImage?.modality}
               date={primaryImage?.date}
@@ -137,7 +149,7 @@ export const ReportCard: React.FC<ReportCardProps> = ({
             {primaryImage && (
               <div className="flex-1">
                 <CoordinateTickFrame
-                  imageUrl={primaryImage.previewUrl || (primaryImage.url_or_base64?.startsWith('data:image/tiff') ? undefined : primaryImage.url_or_base64)}
+                  imageUrl={getSafeImageUrl(primaryImage)}
                   modality={primaryImage.modality}
                   date={primaryImage.date}
                   caption={primaryImage.name || 'Input Imagery'}
@@ -147,7 +159,7 @@ export const ReportCard: React.FC<ReportCardProps> = ({
             {secondaryImage && (
               <div className="flex-1">
                 <CoordinateTickFrame
-                  imageUrl={secondaryImage.previewUrl || (secondaryImage.url_or_base64?.startsWith('data:image/tiff') ? undefined : secondaryImage.url_or_base64)}
+                  imageUrl={getSafeImageUrl(secondaryImage)}
                   modality={secondaryImage.modality}
                   date={secondaryImage.date}
                   caption={secondaryImage.name || 'Comparison Imagery'}

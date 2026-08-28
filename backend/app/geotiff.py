@@ -162,13 +162,16 @@ def process_geotiff(
     max_dim: int = 2048,
 ) -> Tuple[Image.Image, Optional[GeoMetadata]]:
     """
-    Decodes raw GeoTIFF bytes into a normalized 8-bit RGB PIL.Image and
+    Decodes raw GeoTIFF or JPEG 2000 (JP2) bytes into a normalized 8-bit RGB PIL.Image and
     extracts geospatial metadata (CRS, WGS84 bounding box, Affine transform).
+
+    Uses fast hardware/wavelet decimated sub-sampling for large raster tiles (> max_dim).
 
     Returns:
         (pil_image, geo_metadata)
     """
     import rasterio
+    from rasterio.enums import Resampling
     from rasterio.io import MemoryFile
     from rasterio.warp import transform_bounds
     import pyproj
@@ -182,14 +185,38 @@ def process_geotiff(
                 crs_obj = src.crs
                 transform = src.transform
 
-                # 1. Read bands with dynamic resolution chain
+                # 1. Determine read shape with fast decimation for large tiles
+                orig_size = (width, height)
+                if max(width, height) > max_dim:
+                    if width >= height:
+                        out_w = max_dim
+                        out_h = max(1, int(height * (max_dim / width)))
+                    else:
+                        out_h = max_dim
+                        out_w = max(1, int(width * (max_dim / height)))
+                    read_shape = (out_h, out_w)
+                    scaled_size = (out_w, out_h)
+                    scale_x = width / float(out_w)
+                    scale_y = height / float(out_h)
+                else:
+                    read_shape = None
+                    scaled_size = orig_size
+                    scale_x = 1.0
+                    scale_y = 1.0
+
+                # 2. Read bands with dynamic resolution chain
                 band_resolution_tier = None
                 band_resolution_warning = None
                 if n_bands >= 3:
                     (r_idx, g_idx, b_idx), band_resolution_tier, band_resolution_warning = _resolve_rgb_bands(src)
-                    r = src.read(r_idx)
-                    g = src.read(g_idx)
-                    b = src.read(b_idx)
+                    if read_shape:
+                        r = src.read(r_idx, out_shape=read_shape, resampling=Resampling.bilinear)
+                        g = src.read(g_idx, out_shape=read_shape, resampling=Resampling.bilinear)
+                        b = src.read(b_idx, out_shape=read_shape, resampling=Resampling.bilinear)
+                    else:
+                        r = src.read(r_idx)
+                        g = src.read(g_idx)
+                        b = src.read(b_idx)
 
                     r_u8 = normalize_band_percentile(r)
                     g_u8 = normalize_band_percentile(g)
@@ -198,8 +225,13 @@ def process_geotiff(
                     pil_img = Image.fromarray(rgb_array, mode="RGB")
 
                 elif n_bands == 2:
-                    b1 = src.read(1)
-                    b2 = src.read(2)
+                    if read_shape:
+                        b1 = src.read(1, out_shape=read_shape, resampling=Resampling.bilinear)
+                        b2 = src.read(2, out_shape=read_shape, resampling=Resampling.bilinear)
+                    else:
+                        b1 = src.read(1)
+                        b2 = src.read(2)
+
                     b1_u8 = normalize_band_percentile(b1)
                     b2_u8 = normalize_band_percentile(b2)
                     eps = 1e-6
@@ -210,13 +242,17 @@ def process_geotiff(
                     band_resolution_tier = "sar_dual_polarization"
 
                 else:
-                    b1 = src.read(1)
+                    if read_shape:
+                        b1 = src.read(1, out_shape=read_shape, resampling=Resampling.bilinear)
+                    else:
+                        b1 = src.read(1)
+
                     b1_u8 = normalize_band_percentile(b1)
                     rgb_array = np.stack([b1_u8, b1_u8, b1_u8], axis=-1)
                     pil_img = Image.fromarray(rgb_array, mode="RGB")
                     band_resolution_tier = "single_band_grayscale"
 
-                # 2. Extract Geospatial Coordinates
+                # 3. Extract Geospatial Coordinates
                 geo_meta = None
                 if crs_obj:
                     src_crs_str = crs_obj.to_string()
@@ -244,24 +280,6 @@ def process_geotiff(
                             float(round(src.bounds.top, 6)),
                         ]
 
-                    # 3. Handle Scaling if oversized
-                    orig_size = (width, height)
-                    scaled_size = orig_size
-                    scale_x = 1.0
-                    scale_y = 1.0
-
-                    if max(width, height) > max_dim:
-                        if width >= height:
-                            new_w = max_dim
-                            new_h = int(height * (max_dim / width))
-                        else:
-                            new_h = max_dim
-                            new_w = int(width * (max_dim / height))
-                        pil_img = pil_img.resize((new_w, new_h), Image.Resampling.BICUBIC)
-                        scaled_size = (new_w, new_h)
-                        scale_x = width / float(new_w)
-                        scale_y = height / float(new_h)
-
                     geo_meta = GeoMetadata(
                         crs=src_crs_str,
                         image_bounds=bounds_list,
@@ -283,9 +301,17 @@ def process_geotiff(
                 return pil_img, geo_meta
 
     except Exception as e:
-        logger.warning("Rasterio GeoTIFF extraction failed: %s. Falling back to PIL.", e)
+        logger.warning("Rasterio GeoTIFF/JP2 extraction failed: %s. Falling back to PIL.", e)
         buf = io.BytesIO(data_bytes)
         img = Image.open(buf).convert("RGB")
+        if max(img.width, img.height) > max_dim:
+            if img.width >= img.height:
+                nw = max_dim
+                nh = int(img.height * (max_dim / img.width))
+            else:
+                nh = max_dim
+                nw = int(img.width * (max_dim / img.height))
+            img = img.resize((nw, nh), Image.Resampling.BICUBIC)
         return img, None
 
 
