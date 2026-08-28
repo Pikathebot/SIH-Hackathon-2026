@@ -58,9 +58,22 @@ export const QueryComposer: React.FC<QueryComposerProps> = ({
       return;
     }
 
+    const MAX_FILE_SIZE_MB = 150;
     const filesToProcess = Array.from(files).slice(0, remainingSlots);
 
     filesToProcess.forEach((file, index) => {
+      const fileSizeMB = file.size / (1024 * 1024);
+      if (fileSizeMB > MAX_FILE_SIZE_MB) {
+        alert(
+          `File "${file.name}" is too large (${fileSizeMB.toFixed(0)} MB).\n\n` +
+          `Browser memory limits in-browser base64 payloads to ${MAX_FILE_SIZE_MB} MB to prevent browser crashes.\n\n` +
+          `💡 Recommended alternatives:\n` +
+          `• Use the compressed 10m bands from your Sentinel-2 SAFE folder (e.g., TCI_10m.jp2 or B08_10m.jp2, ~20–40 MB).\n` +
+          `• Or export an ROI sub-scene GeoTIFF from QGIS / ArcGIS.`
+        );
+        return;
+      }
+
       const reader = new FileReader();
       reader.onload = async (event) => {
         const base64 = event.target?.result as string;
