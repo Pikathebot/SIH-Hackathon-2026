@@ -96,10 +96,10 @@ def run_raw_inference(
     images: List[Image.Image],
     message: str,
     max_new_tokens: int = 1024,
-) -> Tuple[str, int]:
+) -> Tuple[str, int, Optional[float]]:
     """
     Executes multimodal generation for 1 or more PIL images and a prompt message.
-    Returns (text_output, elapsed_ms).
+    Returns (text_output, elapsed_ms, logit_confidence).
     """
     try:
         images_pil = [
@@ -148,7 +148,7 @@ def run_raw_inference(
         start_time = time.time()
         with torch.no_grad():
             image_tensors = [_img.to(dtype=dtype, device=device) for _img in image_tensors]
-            cont = model.generate(
+            gen_out = model.generate(
                 input_ids.to(device),
                 images=image_tensors,
                 image_sizes=image_sizes,
@@ -157,17 +157,67 @@ def run_raw_inference(
                 temperature=0,
                 max_new_tokens=max_new_tokens,
                 granularity=granularity,
+                return_dict_in_generate=True,
+                output_scores=True,
             )
-            text_output = tokenizer.batch_decode(cont, skip_special_tokens=True)[0]
+
+            if hasattr(gen_out, "sequences"):
+                seq = gen_out.sequences
+                scores = getattr(gen_out, "scores", None)
+            else:
+                seq = gen_out
+                scores = None
+
+            text_output = tokenizer.batch_decode(seq, skip_special_tokens=True)[0]
+
+            logit_conf = None
+            if scores:
+                try:
+                    step_probs = [torch.softmax(s, dim=-1).max(dim=-1).values for s in scores]
+                    if step_probs:
+                        logit_conf = float(torch.stack(step_probs).mean().item())
+                        logit_conf = float(np.clip(logit_conf, 0.50, 0.98))
+                except Exception:
+                    logit_conf = None
+
         elapsed_ms = int((time.time() - start_time) * 1000)
 
-        return text_output.strip(), elapsed_ms
+        return text_output.strip(), elapsed_ms, logit_conf
     except Exception as e:
         raise AIServiceError(
             code=MODEL_INFERENCE_FAILED,
             message=f"RSUniVLM inference execution failed: {e}",
             detail=str(e),
         )
+
+
+def extract_water_spectral_mask(image_pil: Image.Image) -> np.ndarray:
+    """
+    Extracts high-contrast binary water body mask using optical spectral ratios.
+    Identifies rivers, lakes, reservoirs, and flood extent while rejecting vegetation and dry soil.
+    """
+    img_np = np.array(image_pil.convert("RGB"), dtype=np.float32) / 255.0
+    R = img_np[:, :, 0]
+    G = img_np[:, :, 1]
+    B = img_np[:, :, 2]
+    eps = 1e-6
+
+    # Normalized Difference Water Index (NDWI proxy: Blue - Red) and Blue-Green ratio
+    blue_ratio = (B - R) / (B + R + eps)
+    blue_green_ratio = (B - G) / (B + G + eps)
+    brightness = (R + G + B) / 3.0
+
+    # Water condition: positive blue-to-red contrast, non-vegetation green balance, low red reflectance
+    water_condition = (blue_ratio > 0.05) & (blue_green_ratio > -0.35) & (brightness < 0.65) & (R < 0.40)
+
+    mask = np.zeros((image_pil.height, image_pil.width), dtype=np.uint8)
+    mask[water_condition] = 255
+
+    # Clean isolated speckles with morphology
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+    return mask
 
 
 def parse_segmentation_output(

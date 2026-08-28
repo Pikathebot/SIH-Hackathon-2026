@@ -26,7 +26,9 @@ export type VisualEvidenceType = 'none' | 'bbox' | 'mask';
 export interface GeospatialMetadata {
   crs: string;
   image_bounds: [number, number, number, number]; // [min_lon, min_lat, max_lon, max_lat] in WGS84
+  secondary_image_bounds?: [number, number, number, number] | null;
   geo_boxes?: [number, number][][] | null; // [[[lon, lat], ...]]
+  all_images_geo?: Array<{ crs: string; bounds: [number, number, number, number] }> | null;
 }
 
 export interface VisualEvidence {

@@ -1,5 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { QueryImage, Modality } from '../types/contract';
+import { generatePreview } from '../services/api';
 import { 
   Send, 
   Upload, 
@@ -60,10 +61,11 @@ export const QueryComposer: React.FC<QueryComposerProps> = ({
 
     filesToProcess.forEach((file, index) => {
       const reader = new FileReader();
-      reader.onload = (event) => {
+      reader.onload = async (event) => {
         const base64 = event.target?.result as string;
+        const imgId = `img_${Date.now()}_${index + 1}`;
         const newImage: QueryImage = {
-          id: `img_${Date.now()}_${index + 1}`,
+          id: imgId,
           modality: 'optical',
           date: new Date().toISOString().split('T')[0],
           url_or_base64: base64,
@@ -72,6 +74,20 @@ export const QueryComposer: React.FC<QueryComposerProps> = ({
         };
         setImages((prev) => [...prev, newImage].slice(0, 2));
         setShowImageDrawer(true);
+
+        // For TIFF or any uploaded image, request backend PNG preview to guarantee browser display
+        try {
+          const previewRes = await generatePreview(base64);
+          if (previewRes?.preview_base64) {
+            setImages((prev) =>
+              prev.map((img) =>
+                img.id === imgId ? { ...img, previewUrl: previewRes.preview_base64 } : img
+              )
+            );
+          }
+        } catch {
+          // Fallback to original base64 if preview call fails
+        }
       };
       reader.readAsDataURL(file);
     });

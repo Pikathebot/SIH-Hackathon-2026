@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { submitQuery } from '../services/api';
+import { submitQuery, generatePreview } from '../services/api';
 import { QueryImage, QueryResponse } from '../types/contract';
 import { ExecutionSummaryPanel } from './ExecutionSummaryPanel';
 import {
@@ -70,6 +70,7 @@ const GEO_PRESETS: GeoPreset[] = [
 export const MapDetectionWorkspace: React.FC = () => {
   const [selectedPreset, setSelectedPreset] = useState<GeoPreset>(GEO_PRESETS[0]);
   const [customImage, setCustomImage] = useState<string | null>(null);
+  const [customRawPayload, setCustomRawPayload] = useState<string | null>(null);
   const [query, setQuery] = useState(GEO_PRESETS[0].defaultQuery);
   const [isLoading, setIsLoading] = useState(false);
   const [result, setResult] = useState<QueryResponse | null>(null);
@@ -88,6 +89,7 @@ export const MapDetectionWorkspace: React.FC = () => {
   const handleSelectPreset = (preset: GeoPreset) => {
     setSelectedPreset(preset);
     setCustomImage(null);
+    setCustomRawPayload(null);
     setQuery(preset.defaultQuery);
     setResult(null);
     setErrorMsg(null);
@@ -98,10 +100,21 @@ export const MapDetectionWorkspace: React.FC = () => {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = (ev) => {
-      setCustomImage(ev.target?.result as string);
+    reader.onload = async (ev) => {
+      const base64 = ev.target?.result as string;
+      setCustomRawPayload(base64);
+      setCustomImage(base64);
       setResult(null);
       setErrorMsg(null);
+
+      try {
+        const previewRes = await generatePreview(base64);
+        if (previewRes?.preview_base64) {
+          setCustomImage(previewRes.preview_base64);
+        }
+      } catch {
+        // Fallback to original base64
+      }
     };
     reader.readAsDataURL(file);
   };
@@ -126,7 +139,7 @@ export const MapDetectionWorkspace: React.FC = () => {
       id: `map_${Date.now()}`,
       modality: 'optical',
       date: new Date().toISOString().split('T')[0],
-      url_or_base64: activeImageUrl,
+      url_or_base64: customRawPayload || activeImageUrl,
       name: customImage ? 'Custom Upload' : selectedPreset.name,
     };
 

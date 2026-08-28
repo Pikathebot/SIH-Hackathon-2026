@@ -31,7 +31,9 @@ class GeospatialMetadata(BaseModel):
     """Geospatial bounding coordinates and projection metadata."""
     crs: str = "EPSG:4326"
     image_bounds: list[float]  # [min_lon, min_lat, max_lon, max_lat] in WGS84
+    secondary_image_bounds: Optional[list[float]] = None  # Secondary image WGS84 bounds for pairs
     geo_boxes: Optional[list[list[list[float]]]] = None  # [[[lon, lat], ...]]
+    all_images_geo: Optional[list[dict]] = None
 
 
 class VisualEvidence(BaseModel):

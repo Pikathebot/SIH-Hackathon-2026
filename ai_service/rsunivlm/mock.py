@@ -29,9 +29,9 @@ def _get_dummy_png_base64(color=(255, 0, 0, 128), size=(128, 128)) -> str:
 
 
 def _sleep(seconds: float):
-    """Sleep with support for MOCK_FAST_MODE override in rapid CI testing."""
-    if os.environ.get("MOCK_FAST_MODE", "0") == "1":
-        time.sleep(min(seconds, 0.05))
+    """Sleep with support for MOCK_FAST_MODE override or pytest in rapid CI testing."""
+    if os.environ.get("MOCK_FAST_MODE", "0") == "1" or "pytest" in sys.modules:
+        time.sleep(min(seconds, 0.01))
     else:
         time.sleep(seconds)
 
@@ -137,8 +137,9 @@ def run_detection(
     if resolved_mode == "bbox":
         _sleep(2.0)
         elapsed_ms = int((time.time() - start) * 1000)
-        # Bounding boxes in pixel coords [x1, y1, x2, y2]
-        boxes = [[51, 384, 235, 506]]
+        w, h = image.size
+        # Bounding boxes in pixel coords [x1, y1, x2, y2] relative to image size
+        boxes = [[int(0.15 * w), int(0.20 * h), int(0.75 * w), int(0.85 * h)]]
         return {
             "mode": "bbox",
             "boxes": boxes,

@@ -33,9 +33,9 @@ def _get_dummy_classified_regions_base64(size=(128, 128)) -> str:
 
 
 def _sleep(seconds: float):
-    """Sleep with support for MOCK_FAST_MODE override in rapid CI testing."""
-    if os.environ.get("MOCK_FAST_MODE", "0") == "1":
-        time.sleep(min(seconds, 0.05))
+    """Sleep with support for MOCK_FAST_MODE override or pytest in rapid CI testing."""
+    if os.environ.get("MOCK_FAST_MODE", "0") == "1" or "pytest" in sys.modules:
+        time.sleep(min(seconds, 0.01))
     else:
         time.sleep(seconds)
 
@@ -91,6 +91,9 @@ def run_fusion(
             "parameters": {
                 "classifier_type": "heuristic_stacked_spectral_sar",
                 "classes": ["built-up", "water", "vegetation"],
+                "urban_coverage_pct": 34.0,
+                "vegetation_coverage_pct": 38.0,
+                "water_coverage_pct": 28.0,
                 "confidence_source": "heuristic",
             },
             "latency_ms": elapsed_ms,

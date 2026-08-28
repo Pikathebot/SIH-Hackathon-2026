@@ -340,7 +340,12 @@ def _dispatch_ai_sync(
 # ---------------------------------------------------------------------------
 # Response assemblers — AI result TypedDict → API QueryResponse
 # ---------------------------------------------------------------------------
-def _assemble_response(task: str, result: dict, geo_meta: Optional[GeoMetadata] = None) -> QueryResponse:
+def _assemble_response(
+    task: str,
+    result: dict,
+    geo_meta: Optional[GeoMetadata] = None,
+    secondary_geo_meta: Optional[GeoMetadata] = None,
+) -> QueryResponse:
     """Map an AI result dict to the API response shape with optional GeoTIFF coordinates."""
     meta = result["meta"]
     execution_summary = ExecutionSummary(
@@ -355,10 +360,19 @@ def _assemble_response(task: str, result: dict, geo_meta: Optional[GeoMetadata] 
     if geo_meta and geo_meta.image_bounds:
         boxes = result.get("boxes")
         geo_boxes = pixel_boxes_to_geo_polygons(boxes, geo_meta) if boxes else None
+
+        all_geo = [{"crs": geo_meta.crs, "bounds": geo_meta.image_bounds}]
+        sec_bounds = None
+        if secondary_geo_meta and secondary_geo_meta.image_bounds:
+            sec_bounds = secondary_geo_meta.image_bounds
+            all_geo.append({"crs": secondary_geo_meta.crs, "bounds": secondary_geo_meta.image_bounds})
+
         geospatial = GeospatialMetadata(
             crs=geo_meta.crs,
             image_bounds=geo_meta.image_bounds,
+            secondary_image_bounds=sec_bounds,
             geo_boxes=geo_boxes,
+            all_images_geo=all_geo if len(all_geo) > 1 else None,
         )
 
     if task == "vqa":
@@ -533,7 +547,22 @@ async def process_query(request: QueryRequest) -> QueryResponse:
     # 3. Decode images (sync — fast operation)
     decoded_pairs = [_decode_image(img.url_or_base64) for img in request.images]
     decoded_images = [pair[0] for pair in decoded_pairs]
-    primary_geo_meta = decoded_pairs[0][1] if decoded_pairs else None
+    
+    # Extract geospatial metadata for all available images
+    primary_geo_meta = None
+    secondary_geo_meta = None
+    if len(decoded_pairs) == 1:
+        primary_geo_meta = decoded_pairs[0][1]
+    elif len(decoded_pairs) >= 2:
+        geo0 = decoded_pairs[0][1]
+        geo1 = decoded_pairs[1][1]
+        if geo0 and geo1:
+            primary_geo_meta = geo0
+            secondary_geo_meta = geo1
+        elif geo0:
+            primary_geo_meta = geo0
+        elif geo1:
+            primary_geo_meta = geo1
 
     # 4. Compute checksums for DB logging
     image_checksums = [_compute_image_checksum(img) for img in decoded_images]
@@ -553,9 +582,14 @@ async def process_query(request: QueryRequest) -> QueryResponse:
         ) from exc
 
     # 6. Assemble API response
-    response = _assemble_response(task, result, geo_meta=primary_geo_meta)
+    response = _assemble_response(
+        task,
+        result,
+        geo_meta=primary_geo_meta,
+        secondary_geo_meta=secondary_geo_meta,
+    )
 
     # 7. Log to DB (non-blocking, best-effort)
-    asyncio.create_task(_log_query_to_db(request, task, response, image_checksums))
+    await _log_query_to_db(request, task, response, image_checksums)
 
     return response

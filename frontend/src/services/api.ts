@@ -94,3 +94,33 @@ export async function checkHealth(): Promise<HealthResponse> {
     };
   }
 }
+
+export interface PreviewResult {
+  preview_base64: string;
+  format: 'geotiff' | 'standard';
+  geospatial?: {
+    crs: string;
+    image_bounds: [number, number, number, number];
+    secondary_image_bounds?: [number, number, number, number] | null;
+  } | null;
+  width: number;
+  height: number;
+}
+
+/**
+ * Generate a web-friendly PNG preview for any satellite image or GeoTIFF.
+ */
+export async function generatePreview(urlOrBase64: string): Promise<PreviewResult> {
+  const endpoint = `${BASE_URL}/api/v1/preview`;
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url_or_base64: urlOrBase64 }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Preview generation failed with status ${response.status}`);
+  }
+
+  return (await response.json()) as PreviewResult;
+}
