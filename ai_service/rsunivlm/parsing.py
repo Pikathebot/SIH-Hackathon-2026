@@ -16,8 +16,9 @@ from PIL import Image
 
 def extract_water_spectral_mask(image_pil: Image.Image) -> np.ndarray:
     """
-    Extracts high-contrast binary water body mask using optical spectral ratios.
-    Identifies rivers, lakes, reservoirs, and flood extent while rejecting vegetation and dry soil.
+    Extracts high-contrast binary water body mask using optical spectral ratios
+    and single-band absorption characteristics (e.g. Sentinel-2 Band 8 NIR, SAR, Panchromatic).
+    Identifies oceans, coastal waters, rivers, lakes, reservoirs, and flood extent while rejecting vegetation and dry soil.
     """
     img_np = np.array(image_pil.convert("RGB"), dtype=np.float32) / 255.0
     R = img_np[:, :, 0]
@@ -25,40 +26,45 @@ def extract_water_spectral_mask(image_pil: Image.Image) -> np.ndarray:
     B = img_np[:, :, 2]
     eps = 1e-6
 
-    # Normalized Difference Water Index (NDWI proxy: Blue - Red) and Blue-Green ratio
-    blue_ratio = (B - R) / (B + R + eps)
-    blue_green_ratio = (B - G) / (B + G + eps)
-    brightness = (R + G + B) / 3.0
-
     # Max-min channel dispersion (color difference / saturation proxy)
     max_c = np.maximum(np.maximum(R, G), B)
     min_c = np.minimum(np.minimum(R, G), B)
     spread = max_c - min_c
+    brightness = (R + G + B) / 3.0
 
-    # 1. Coastal / River / Shallow water: clear blue/cyan dominance, low red, positive blue-to-red contrast
-    coastal_river_water = (
-        (blue_ratio > 0.06) &
-        (blue_green_ratio > -0.30) &
-        (brightness < 0.60) &
-        (R < 0.25) &
-        (B > R)
-    )
+    # Detect if raster is single-band grayscale / NIR (B08) / SAR
+    is_grayscale = float(np.mean(spread)) < 0.03
 
-    # 2. Deep ocean / clear dark water: tightly constrained against terrestrial shadows & asphalt:
-    # - Strict blue dominance over red (B > R + 0.01)
-    # - Red lower than or equal to Green
-    # - Low color variance / spread across channels
-    # - Low brightness and strictly low red reflectance
-    deep_dark_water = (
-        (brightness < 0.16) &
-        (R < 0.08) &
-        (B > R + 0.01) &
-        (G >= R) &
-        (spread < 0.08) &
-        (blue_ratio > 0.10)
-    )
+    if is_grayscale:
+        # For single-channel NIR (e.g. Sentinel-2 B08) and SAR rasters:
+        # Water absorption creates near-zero reflectance / specular backscatter (< 0.22)
+        # Land and vegetation have strong NIR reflectance / diffuse scattering (> 0.30)
+        water_condition = (brightness < 0.22)
+    else:
+        # Normalized Difference Water Index (NDWI proxy: Blue - Red) and Blue-Green ratio
+        blue_ratio = (B - R) / (B + R + eps)
+        blue_green_ratio = (B - G) / (B + G + eps)
 
-    water_condition = coastal_river_water | deep_dark_water
+        # 1. Coastal / River / Shallow water: clear blue/cyan dominance, low red, positive blue-to-red contrast
+        coastal_river_water = (
+            (blue_ratio > 0.06) &
+            (blue_green_ratio > -0.30) &
+            (brightness < 0.60) &
+            (R < 0.25) &
+            (B > R)
+        )
+
+        # 2. Deep ocean / clear dark water: tightly constrained against terrestrial shadows & asphalt:
+        deep_dark_water = (
+            (brightness < 0.16) &
+            (R < 0.08) &
+            (B > R + 0.01) &
+            (G >= R) &
+            (spread < 0.08) &
+            (blue_ratio > 0.10)
+        )
+
+        water_condition = coastal_river_water | deep_dark_water
 
     mask = np.zeros((image_pil.height, image_pil.width), dtype=np.uint8)
     mask[water_condition] = 255
@@ -68,6 +74,17 @@ def extract_water_spectral_mask(image_pil: Image.Image) -> np.ndarray:
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
     return mask
+
+
+def extract_coastline_contour(water_mask: np.ndarray, thickness: int = 2) -> np.ndarray:
+    """
+    Extracts the sharp 1D/2D land-water interface boundary / coastline contour from a water mask.
+    """
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+    dilated = cv2.dilate(water_mask, kernel, iterations=thickness)
+    eroded = cv2.erode(water_mask, kernel, iterations=thickness)
+    contour = cv2.subtract(dilated, eroded)
+    return contour
 
 
 def parse_segmentation_output(

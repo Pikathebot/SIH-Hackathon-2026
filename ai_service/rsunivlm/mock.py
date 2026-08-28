@@ -124,7 +124,11 @@ def run_detection(
 
     # Route mode
     if mode == "auto":
-        if any(w in q_lower for w in ["highlight", "segment", "mask", "boundary", "outline", "delineate", "water", "river", "lake", "flood", "ocean", "sea", "reservoir"]):
+        if any(w in q_lower for w in [
+            "highlight", "segment", "mask", "boundary", "outline", "delineate",
+            "water", "river", "lake", "flood", "ocean", "sea", "reservoir",
+            "coast", "coastline", "coastal", "shore", "shoreline", "waterline", "land-water"
+        ]):
             resolved_mode = "mask"
         elif any(w in q_lower for w in ["where", "locate", "find", "box"]):
             resolved_mode = "bbox"
