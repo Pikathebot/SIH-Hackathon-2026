@@ -28,6 +28,8 @@ export const CoordinateTickFrame: React.FC<CoordinateTickFrameProps> = ({
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [isHovered, setIsHovered] = useState(false);
+  const [showBoxes, setShowBoxes] = useState(true);
+  const [showGrid, setShowGrid] = useState(true);
   const [crosshairPos, setCrosshairPos] = useState({ x: 0, y: 0, percentX: 50, percentY: 50 });
   const [currentCoords, setCurrentCoords] = useState({ lat: centerLat, lon: centerLon });
 
@@ -63,8 +65,8 @@ export const CoordinateTickFrame: React.FC<CoordinateTickFrameProps> = ({
 
   return (
     <div className="flex flex-col gap-1.5 w-full">
-      {/* Top Telemetry Tag */}
-      <div className="flex items-center justify-between text-xs text-text-muted px-1">
+      {/* Top Telemetry Tag & Layer Controls */}
+      <div className="flex items-center justify-between text-xs text-text-muted px-1 flex-wrap gap-2">
         <div className="flex items-center gap-2">
           {modality && (
             <span className="capitalize px-2 py-0.5 bg-surface-variant border border-grid-hairline text-text-primary rounded-md font-medium text-[11px]">
@@ -74,9 +76,39 @@ export const CoordinateTickFrame: React.FC<CoordinateTickFrameProps> = ({
           {date && <span>Date: {date}</span>}
           {caption && <span className="truncate max-w-xs font-medium text-text-primary">{caption}</span>}
         </div>
-        <div className="flex items-center gap-1.5 text-cyan-detection font-medium text-[11px]">
-          <Crosshair className="w-3.5 h-3.5" />
-          <span>Calibrated Coordinates</span>
+
+        {/* Viewport Layer Toggles */}
+        <div className="flex items-center gap-2">
+          {hasBoxes && (
+            <button
+              type="button"
+              onClick={() => setShowBoxes(!showBoxes)}
+              className={`px-2 py-0.5 rounded text-[10px] font-medium border transition-colors cursor-pointer ${
+                showBoxes
+                  ? 'bg-cyan-detection/10 border-cyan-detection/40 text-cyan-detection'
+                  : 'bg-surface-variant/40 border-grid-hairline text-text-muted opacity-60'
+              }`}
+            >
+              Boxes ({visualEvidence?.boxes?.length})
+            </button>
+          )}
+
+          <button
+            type="button"
+            onClick={() => setShowGrid(!showGrid)}
+            className={`px-2 py-0.5 rounded text-[10px] font-medium border transition-colors cursor-pointer ${
+              showGrid
+                ? 'bg-primary/10 border-primary/40 text-primary'
+                : 'bg-surface-variant/40 border-grid-hairline text-text-muted opacity-60'
+            }`}
+          >
+            Grid
+          </button>
+
+          <div className="flex items-center gap-1 text-cyan-detection font-medium text-[11px] ml-1">
+            <Crosshair className="w-3.5 h-3.5" />
+            <span>Calibrated Coordinates</span>
+          </div>
         </div>
       </div>
 
@@ -99,8 +131,12 @@ export const CoordinateTickFrame: React.FC<CoordinateTickFrameProps> = ({
         <div className="corner-br-v" />
 
         {/* Top and Left Axis Ruler Ticks */}
-        <div className="absolute top-0 left-0 w-full h-1 ruler-tick-x z-10 pointer-events-none opacity-80" />
-        <div className="absolute top-0 left-0 h-full w-1 ruler-tick-y z-10 pointer-events-none opacity-80" />
+        {showGrid && (
+          <>
+            <div className="absolute top-0 left-0 w-full h-1 ruler-tick-x z-10 pointer-events-none opacity-80" />
+            <div className="absolute top-0 left-0 h-full w-1 ruler-tick-y z-10 pointer-events-none opacity-80" />
+          </>
+        )}
 
         {/* Image Content */}
         <div className="absolute inset-1.5 border border-grid-hairline bg-surface-container overflow-hidden rounded-lg">
@@ -113,7 +149,7 @@ export const CoordinateTickFrame: React.FC<CoordinateTickFrameProps> = ({
               />
 
               {/* Bounding Boxes SVG Layer */}
-              {hasBoxes && (
+              {hasBoxes && showBoxes && (
                 <svg
                   className="absolute inset-0 w-full h-full pointer-events-none z-15"
                   viewBox="0 0 1000 1000"

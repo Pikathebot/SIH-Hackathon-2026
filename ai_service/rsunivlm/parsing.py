@@ -173,3 +173,51 @@ def mask_to_base64(binary_mask: np.ndarray) -> str:
     """Encodes a 2D numpy mask to a base64 grayscale PNG."""
     mask_pil = Image.fromarray(binary_mask, mode="L")
     return image_to_base64(mask_pil, format="PNG")
+
+
+def clean_vlm_text_output(text: str) -> str:
+    """
+    Sanitizes raw autoregressive VLM text output:
+    1. Truncates at conversation template delimiters (###, <|im_end|>, User:, Assistant:)
+    2. Strips leading task tags ([VQA], [CCD], etc.)
+    3. Detects and trims repetitive token/phrase cycles
+    4. Normalizes punctuation spacing and whitespace
+    """
+    if not text:
+        return ""
+
+    # 1. Truncate at common chat/template delimiters and stop sequences
+    stop_patterns = [
+        r"###",
+        r"<\|im_end\|>",
+        r"<\|endoftext\|>",
+        r"\bUser:",
+        r"\bAssistant:",
+        r"\bHuman:",
+        r"\bQuestion:",
+    ]
+    cleaned = text
+    for pat in stop_patterns:
+        match = re.search(pat, cleaned, flags=re.IGNORECASE)
+        if match:
+            cleaned = cleaned[:match.start()]
+
+    # 2. Clean leading/trailing task tags if leaked into response
+    cleaned = re.sub(r"^\s*\[(VQA|CAP|CCD|SEG|DET|VG|REF)\]\s*", "", cleaned, flags=re.IGNORECASE)
+
+    # 3. Detect and remove repeating token/phrase cycles (e.g. '### 2410 ### 2410' or 'word word word')
+    words = cleaned.strip().split()
+    if len(words) > 6:
+        for n in range(1, min(15, len(words) // 2)):
+            for i in range(len(words) - 2 * n):
+                chunk1 = words[i : i + n]
+                chunk2 = words[i + n : i + 2 * n]
+                chunk3 = words[i + 2 * n : i + 3 * n] if i + 3 * n <= len(words) else None
+                if chunk1 == chunk2 and (chunk3 is None or chunk1 == chunk3):
+                    words = words[: i + n]
+                    break
+        cleaned = " ".join(words)
+
+    # 4. Clean extra whitespace around punctuation
+    cleaned = re.sub(r"\s+([.,!?;])", r"\1", cleaned)
+    return cleaned.strip()

@@ -177,3 +177,12 @@ class TestVisionUtilities:
         overlay = create_overlay_image(sample_optical_image, mask, color=(0, 0, 255), alpha=0.5)
         assert isinstance(overlay, Image.Image)
         assert overlay.size == sample_optical_image.size
+
+    def test_clean_vlm_text_output_strips_delimiters_and_loops(self):
+        from ai_service.rsunivlm.parsing import clean_vlm_text_output
+        raw = "the two scenes seem identical .### 2410 ### 2410 ### 2410 ### 2410 ### 2410"
+        cleaned = clean_vlm_text_output(raw)
+        assert cleaned == "the two scenes seem identical."
+
+        leaked_tag = "[CCD] Major urban expansion observed on the east sector.<|im_end|>"
+        assert clean_vlm_text_output(leaked_tag) == "Major urban expansion observed on the east sector."
