@@ -21,7 +21,7 @@ from fastapi.responses import JSONResponse
 
 from app.database import init_db
 from app.models.api import ErrorDetail, ErrorResponse
-from app.routers import health_router, query_router
+from app.routers import health_router, query_router, preview_router
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -89,6 +89,7 @@ app.add_middleware(
 # ---------------------------------------------------------------------------
 app.include_router(health_router)
 app.include_router(query_router)
+app.include_router(preview_router)
 
 
 # ---------------------------------------------------------------------------

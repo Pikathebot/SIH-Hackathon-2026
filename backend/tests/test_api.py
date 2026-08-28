@@ -8,6 +8,7 @@ response validates against API_CONTRACT.md's JSON shapes.
 import sys
 from pathlib import Path
 
+import numpy as np
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
@@ -372,3 +373,47 @@ class TestResponseShape:
         response = await client.post("/api/v1/query", json=payload)
         data = response.json()
         assert data["task"] in valid_tasks
+
+
+# -------------------------------------------------------------------------
+# GeoTIFF integration tests — API_CONTRACT.md v1.1.0
+# -------------------------------------------------------------------------
+class TestGeoTIFFIntegration:
+    """Validate GeoTIFF ingestion, decoding, and geospatial metadata return."""
+
+    @pytest.mark.asyncio
+    async def test_geotiff_query_returns_geospatial_metadata(self, client):
+        """Ensure submitting a GeoTIFF populates visual_evidence.geospatial."""
+        import base64
+        from tests.test_geotiff import _create_synthetic_geotiff_bytes
+
+        tiff_bytes = _create_synthetic_geotiff_bytes(
+            width=64, height=64, n_bands=4, dtype=np.uint16,
+            bounds=(12.720, 48.090, 12.760, 48.130), crs="EPSG:4326",
+        )
+        tiff_b64 = base64.b64encode(tiff_bytes).decode("utf-8")
+
+        payload = {
+            "query": "Where are the cultivated fields?",
+            "images": [
+                {
+                    "id": "geo_img1",
+                    "modality": "optical",
+                    "url_or_base64": tiff_b64,
+                }
+            ],
+        }
+        response = await client.post("/api/v1/query", json=payload)
+        assert response.status_code == 200
+        data = response.json()
+
+        assert "visual_evidence" in data
+        ve = data["visual_evidence"]
+        assert "geospatial" in ve
+        geo = ve["geospatial"]
+        assert geo is not None
+        assert "image_bounds" in geo
+        assert len(geo["image_bounds"]) == 4
+        assert geo["image_bounds"][0] == pytest.approx(12.720, abs=0.01)
+        assert geo["image_bounds"][1] == pytest.approx(48.090, abs=0.01)
+        assert "crs" in geo

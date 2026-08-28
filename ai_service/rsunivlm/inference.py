@@ -96,10 +96,10 @@ def run_raw_inference(
     images: List[Image.Image],
     message: str,
     max_new_tokens: int = 1024,
-) -> Tuple[str, int]:
+) -> Tuple[str, int, Optional[float]]:
     """
     Executes multimodal generation for 1 or more PIL images and a prompt message.
-    Returns (text_output, elapsed_ms).
+    Returns (text_output, elapsed_ms, logit_confidence).
     """
     try:
         images_pil = [
@@ -148,7 +148,7 @@ def run_raw_inference(
         start_time = time.time()
         with torch.no_grad():
             image_tensors = [_img.to(dtype=dtype, device=device) for _img in image_tensors]
-            cont = model.generate(
+            gen_out = model.generate(
                 input_ids.to(device),
                 images=image_tensors,
                 image_sizes=image_sizes,
@@ -157,11 +157,32 @@ def run_raw_inference(
                 temperature=0,
                 max_new_tokens=max_new_tokens,
                 granularity=granularity,
+                return_dict_in_generate=True,
+                output_scores=True,
             )
-            text_output = tokenizer.batch_decode(cont, skip_special_tokens=True)[0]
+
+            if hasattr(gen_out, "sequences"):
+                seq = gen_out.sequences
+                scores = getattr(gen_out, "scores", None)
+            else:
+                seq = gen_out
+                scores = None
+
+            text_output = tokenizer.batch_decode(seq, skip_special_tokens=True)[0]
+
+            logit_conf = None
+            if scores:
+                try:
+                    step_probs = [torch.softmax(s, dim=-1).max(dim=-1).values for s in scores]
+                    if step_probs:
+                        logit_conf = float(torch.stack(step_probs).mean().item())
+                        logit_conf = float(np.clip(logit_conf, 0.50, 0.98))
+                except Exception:
+                    logit_conf = None
+
         elapsed_ms = int((time.time() - start_time) * 1000)
 
-        return text_output.strip(), elapsed_ms
+        return text_output.strip(), elapsed_ms, logit_conf
     except Exception as e:
         raise AIServiceError(
             code=MODEL_INFERENCE_FAILED,
@@ -170,106 +191,12 @@ def run_raw_inference(
         )
 
 
-def parse_segmentation_output(
-    output_string: str,
-    img_size: Tuple[int, int],
-    target_label: Optional[str] = None,
-    patch_size: int = 20,
-) -> Tuple[Optional[np.ndarray], set]:
-    """
-    Parses tokenized segmentation output into a 2D binary uint8 mask (0 or 255).
-    """
-    output_string = output_string.lower().strip()
-    try:
-        labels = set(re.findall(r"\b[a-z]+(?: [a-z]+)*\b", output_string))
-        rows = output_string.split("\n")
-        parsed_mask = []
-        for row in rows:
-            row_data = []
-            patches = row.split(", ")
-            for patch in patches:
-                if "*" in patch:
-                    parts = patch.strip().split("*")
-                    if len(parts) == 2:
-                        label, count = parts[0].strip(), int(parts[1].strip())
-                        row_data.extend([label] * count)
-            if row_data:
-                parsed_mask.append(row_data)
-
-        if not parsed_mask:
-            return None, labels
-
-        parsed_mask_np = np.array(parsed_mask)
-        height, width = parsed_mask_np.shape
-
-        binary_mask = np.zeros((height * patch_size, width * patch_size), dtype=np.uint8)
-        for i in range(height):
-            for j in range(width):
-                val = parsed_mask_np[i, j].strip()
-                if val != "others" and (target_label is None or target_label in val or val in target_label):
-                    binary_mask[i * patch_size : (i + 1) * patch_size, j * patch_size : (j + 1) * patch_size] = 255
-
-        binary_mask = cv2.resize(binary_mask, (img_size[0], img_size[1]), interpolation=cv2.INTER_NEAREST)
-        return binary_mask, labels
-    except Exception as e:
-        print(f"Error parsing segmentation mask tokens: {e}", file=sys.stderr)
-        return None, set()
-
-
-def parse_bounding_boxes(
-    text_output: str,
-    img_size: Tuple[int, int],
-) -> List[List[int]]:
-    """
-    Extracts normalized coordinates [0-100] from text output and scales to pixel coords [x1, y1, x2, y2].
-    """
-    pred_match = re.findall(r"\[([0-9., ]+)\]", text_output)
-    boxes = []
-    width, height = img_size
-    for match in pred_match:
-        try:
-            coords = [float(x.strip()) for x in match.split(",") if x.strip()]
-            if len(coords) >= 4:
-                box = coords[:4]
-                x1 = int(round(box[0] / 100.0 * width))
-                y1 = int(round(box[1] / 100.0 * height))
-                x2 = int(round(box[2] / 100.0 * width))
-                y2 = int(round(box[3] / 100.0 * height))
-                # Ensure valid bounding box coordinates
-                x1, x2 = min(x1, x2), max(x1, x2)
-                y1, y2 = min(y1, y2), max(y1, y2)
-                boxes.append([x1, y1, x2, y2])
-        except Exception:
-            continue
-    return boxes
-
-
-def create_overlay_image(
-    image_pil: Image.Image,
-    binary_mask: np.ndarray,
-    color: Tuple[int, int, int] = (0, 0, 255),
-    alpha: float = 0.5,
-) -> Image.Image:
-    """
-    Creates a visual overlay with a colored semi-transparent mask on top of the original PIL image.
-    """
-    img_np = cv2.cvtColor(np.array(image_pil.convert("RGB")), cv2.COLOR_RGB2BGR)
-    colored_layer = np.zeros_like(img_np, dtype=np.uint8)
-    colored_layer[:] = color
-    mask_bool = binary_mask > 128
-    overlay = img_np.copy()
-    overlay[mask_bool] = cv2.addWeighted(img_np, 1.0 - alpha, colored_layer, alpha, 0.0)[mask_bool]
-    return Image.fromarray(cv2.cvtColor(overlay, cv2.COLOR_BGR2RGB))
-
-
-def image_to_base64(image_pil: Image.Image, format: str = "PNG") -> str:
-    """Encodes a PIL image to a base64 string."""
-    buf = io.BytesIO()
-    image_pil.save(buf, format=format)
-    return base64.b64encode(buf.getvalue()).decode("utf-8")
-
-
-def mask_to_base64(binary_mask: np.ndarray) -> str:
-    """Encodes a 2D numpy mask to a base64 grayscale PNG."""
-    mask_pil = Image.fromarray(binary_mask, mode="L")
-    return image_to_base64(mask_pil, format="PNG")
+# Re-export pure parsing utilities from parsing.py
+from ai_service.rsunivlm.parsing import (
+    extract_water_spectral_mask,
+    parse_segmentation_output,
+    parse_bounding_boxes,
+    create_overlay_image,
+    image_to_base64,
+    mask_to_base64,
+)

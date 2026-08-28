@@ -7,12 +7,14 @@
 
 FROM python:3.11-slim
 
-# System dependencies for Pillow
+# System dependencies for Pillow, Rasterio, and Pyproj
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         libjpeg-dev \
         libpng-dev \
-        zlib1g-dev && \
+        zlib1g-dev \
+        gdal-bin \
+        libgdal-dev && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

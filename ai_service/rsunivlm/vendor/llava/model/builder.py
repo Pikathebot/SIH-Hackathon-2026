@@ -32,12 +32,14 @@ def load_pretrained_model(model_path, model_base, model_name, load_8bit=False, l
     elif load_4bit:
         kwargs["load_in_4bit"] = True
         kwargs["quantization_config"] = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_compute_dtype=torch.float16, bnb_4bit_use_double_quant=True, bnb_4bit_quant_type="nf4")
-    elif torch_dtype == "float16":
+    elif torch_dtype in ("float16", torch.float16):
         kwargs["torch_dtype"] = torch.float16
-    elif torch_dtype == "bfloat16":
+    elif torch_dtype in ("bfloat16", torch.bfloat16):
         kwargs["torch_dtype"] = torch.bfloat16
+    elif torch_dtype in ("float32", torch.float32):
+        kwargs["torch_dtype"] = torch.float32
     else:
-        import pdb;pdb.set_trace()
+        kwargs["torch_dtype"] = torch.float32
 
     if customized_config is not None:
         kwargs["config"] = customized_config
@@ -311,7 +313,9 @@ def load_pretrained_model(model_path, model_base, model_name, load_8bit=False, l
         if not vision_tower.is_loaded:
             vision_tower.load_model(device_map=device_map)
         if device_map != "auto":
-            vision_tower.to(device="cuda", dtype=torch.float16)
+            target_dev = "cuda" if torch.cuda.is_available() else "cpu"
+            target_dt = torch.float16 if torch.cuda.is_available() else torch.float32
+            vision_tower.to(device=target_dev, dtype=target_dt)
         image_processor = vision_tower.image_processor
 
     if hasattr(model.config, "max_sequence_length"):

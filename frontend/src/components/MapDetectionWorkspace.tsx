@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { submitQuery } from '../services/api';
+import { submitQuery, generatePreview, isBrowserRenderable } from '../services/api';
 import { QueryImage, QueryResponse } from '../types/contract';
 import { ExecutionSummaryPanel } from './ExecutionSummaryPanel';
 import {
@@ -24,52 +24,57 @@ interface GeoPreset {
   category: string;
   lat: number;
   lon: number;
-  defaultQuery: string;
   imageUrl: string;
+  defaultQuery: string;
 }
 
 const GEO_PRESETS: GeoPreset[] = [
   {
-    id: 'airfield',
-    name: 'Military Airbase',
-    category: 'Aviation',
-    lat: 34.0522,
-    lon: -118.2437,
-    defaultQuery: 'Detect all military and civilian aircraft on the runway and tarmac',
-    imageUrl: 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?q=80&w=1200&auto=format&fit=crop',
+    id: 'port_rotterdam',
+    name: 'Port of Rotterdam',
+    category: 'Maritime / Logistics',
+    lat: 51.9542,
+    lon: 4.1456,
+    imageUrl:
+      'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?q=80&w=1200&auto=format&fit=crop',
+    defaultQuery: 'Detect all shipping vessels, cargo barges, and container cranes.',
   },
   {
-    id: 'harbor',
-    name: 'Shipping Terminal',
-    category: 'Maritime',
-    lat: 37.7749,
-    lon: -122.4194,
-    defaultQuery: 'Detect all cargo ships, tankers, and vessels docked or anchored in the harbor',
-    imageUrl: 'https://images.unsplash.com/photo-1508873696983-2df5293cb32f?q=80&w=1200&auto=format&fit=crop',
+    id: 'suez_canal',
+    name: 'Suez Canal Convoy Zone',
+    category: 'Critical Bottleneck',
+    lat: 30.7050,
+    lon: 32.3444,
+    imageUrl:
+      'https://images.unsplash.com/photo-1508873696983-2df5293cb32f?q=80&w=1200&auto=format&fit=crop',
+    defaultQuery: 'Identify transit container ships and water vessel bounds.',
   },
   {
-    id: 'reservoir',
-    name: 'Coastal Reservoir',
-    category: 'Hydrology',
-    lat: 25.2048,
-    lon: 55.2708,
-    defaultQuery: 'Locate and highlight all water reservoirs, lakes, and drainage channels',
-    imageUrl: 'https://images.unsplash.com/photo-1524661135-423995f22d0b?q=80&w=1200&auto=format&fit=crop',
+    id: 'dubai_airbase',
+    name: 'Al Maktoum Apron',
+    category: 'Aviation Infrastructure',
+    lat: 24.8967,
+    lon: 55.1614,
+    imageUrl:
+      'https://images.unsplash.com/photo-1541185933-ef5d8ed016c2?q=80&w=1200&auto=format&fit=crop',
+    defaultQuery: 'Locate commercial aircraft, hangars, and tarmac support vehicles.',
   },
   {
-    id: 'industrial',
-    name: 'Energy & Storage Complex',
-    category: 'Infrastructure',
-    lat: 29.9792,
-    lon: 31.1342,
-    defaultQuery: 'Detect all oil storage tanks, chemical silos, and industrial buildings',
-    imageUrl: 'https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?q=80&w=1200&auto=format&fit=crop',
+    id: 'tokyo_bay',
+    name: 'Tokyo Bay Industrial Coast',
+    category: 'Urban Coastal',
+    lat: 35.5300,
+    lon: 139.7800,
+    imageUrl:
+      'https://images.unsplash.com/photo-1524661135-423995f22d0b?q=80&w=1200&auto=format&fit=crop',
+    defaultQuery: 'Map coastal industrial facilities, docks, and maritime traffic.',
   },
 ];
 
 export const MapDetectionWorkspace: React.FC = () => {
   const [selectedPreset, setSelectedPreset] = useState<GeoPreset>(GEO_PRESETS[0]);
   const [customImage, setCustomImage] = useState<string | null>(null);
+  const [customRawPayload, setCustomRawPayload] = useState<string | null>(null);
   const [query, setQuery] = useState(GEO_PRESETS[0].defaultQuery);
   const [isLoading, setIsLoading] = useState(false);
   const [result, setResult] = useState<QueryResponse | null>(null);
@@ -88,6 +93,7 @@ export const MapDetectionWorkspace: React.FC = () => {
   const handleSelectPreset = (preset: GeoPreset) => {
     setSelectedPreset(preset);
     setCustomImage(null);
+    setCustomRawPayload(null);
     setQuery(preset.defaultQuery);
     setResult(null);
     setErrorMsg(null);
@@ -98,10 +104,21 @@ export const MapDetectionWorkspace: React.FC = () => {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = (ev) => {
-      setCustomImage(ev.target?.result as string);
+    reader.onload = async (ev) => {
+      const base64 = ev.target?.result as string;
+      setCustomRawPayload(base64);
+      setCustomImage(isBrowserRenderable(base64) ? base64 : null);
       setResult(null);
       setErrorMsg(null);
+
+      try {
+        const previewRes = await generatePreview(base64);
+        if (previewRes?.preview_base64) {
+          setCustomImage(previewRes.preview_base64);
+        }
+      } catch {
+        // Fallback
+      }
     };
     reader.readAsDataURL(file);
   };
@@ -126,7 +143,7 @@ export const MapDetectionWorkspace: React.FC = () => {
       id: `map_${Date.now()}`,
       modality: 'optical',
       date: new Date().toISOString().split('T')[0],
-      url_or_base64: activeImageUrl,
+      url_or_base64: customRawPayload || activeImageUrl,
       name: customImage ? 'Custom Upload' : selectedPreset.name,
     };
 
@@ -188,7 +205,7 @@ export const MapDetectionWorkspace: React.FC = () => {
               <Upload className="w-3.5 h-3.5" />
               Upload Image
             </button>
-            <input type="file" ref={fileInputRef} onChange={handleUpload} accept="image/*" className="hidden" />
+            <input type="file" ref={fileInputRef} onChange={handleUpload} accept="image/*,.tif,.tiff,.jp2,.j2k,.jpx,.jpc,.jpf" className="hidden" />
           </div>
 
           <div className="flex flex-col gap-1.5">
@@ -236,27 +253,56 @@ export const MapDetectionWorkspace: React.FC = () => {
               {result.answer}
             </p>
 
+            {/* Geospatial Coordinates Badge (GeoTIFF) */}
+            {result.visual_evidence?.geospatial && (
+              <div className="bg-primary/10 border border-primary/30 p-2.5 rounded-xl text-xs flex flex-col gap-1 font-mono">
+                <div className="flex items-center justify-between text-primary font-semibold">
+                  <span className="flex items-center gap-1">
+                    <Compass className="w-3.5 h-3.5" />
+                    <span>{result.visual_evidence.geospatial.crs}</span>
+                  </span>
+                  <span className="text-[10px] bg-primary/20 px-1.5 py-0.5 rounded">GeoTIFF Referenced</span>
+                </div>
+                <div className="text-[11px] text-text-muted">
+                  Bounds: [{result.visual_evidence.geospatial.image_bounds.join(', ')}]
+                </div>
+              </div>
+            )}
+
             {detectedBoxes.length > 0 && (
               <div className="flex flex-col gap-1.5 max-h-44 overflow-y-auto">
-                {detectedBoxes.map((_, idx) => (
-                  <button
-                    key={idx}
-                    type="button"
-                    onMouseEnter={() => setHoveredBox(idx)}
-                    onMouseLeave={() => setHoveredBox(null)}
-                    className={`flex items-center justify-between px-3 py-2 text-xs rounded-lg border transition-all text-left ${
-                      hoveredBox === idx
-                        ? 'bg-cyan-detection/10 border-cyan-detection text-text-primary'
-                        : 'bg-surface-container/40 border-grid-hairline text-text-muted hover:bg-surface-variant/30'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full bg-cyan-detection flex-shrink-0" />
-                      <span className="font-medium text-text-primary">Object #{idx + 1}</span>
-                    </div>
-                    <ChevronRight className="w-3.5 h-3.5 opacity-50" />
-                  </button>
-                ))}
+                {detectedBoxes.map((_box, idx) => {
+                  const geoPoly = result.visual_evidence?.geospatial?.geo_boxes?.[idx];
+                  const centerLat = geoPoly ? ((geoPoly[0][1] + geoPoly[2][1]) / 2).toFixed(5) : null;
+                  const centerLon = geoPoly ? ((geoPoly[0][0] + geoPoly[2][0]) / 2).toFixed(5) : null;
+
+                  return (
+                    <button
+                      key={idx}
+                      type="button"
+                      onMouseEnter={() => setHoveredBox(idx)}
+                      onMouseLeave={() => setHoveredBox(null)}
+                      className={`flex items-center justify-between px-3 py-2 text-xs rounded-lg border transition-all text-left ${
+                        hoveredBox === idx
+                          ? 'bg-cyan-detection/10 border-cyan-detection text-text-primary'
+                          : 'bg-surface-container/40 border-grid-hairline text-text-muted hover:bg-surface-variant/30'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full bg-cyan-detection flex-shrink-0" />
+                        <div>
+                          <p className="font-medium text-text-primary">Object #{idx + 1}</p>
+                          {centerLat && centerLon && (
+                            <p className="text-[10px] font-mono text-primary">
+                              {centerLat}° N, {centerLon}° E
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                      <ChevronRight className="w-3.5 h-3.5 opacity-50" />
+                    </button>
+                  );
+                })}
               </div>
             )}
 
@@ -368,7 +414,9 @@ export const MapDetectionWorkspace: React.FC = () => {
               {/* Top-right sensor badge */}
               <div className="absolute top-3 right-3 bg-surface-panel/90 backdrop-blur-md border border-grid-hairline px-3 py-1.5 rounded-xl text-xs flex items-center gap-1.5 shadow-lg">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-sensor animate-pulse" />
-                <span className="text-text-primary font-medium">Optical Layer</span>
+                <span className="text-text-primary font-medium">
+                  {result?.visual_evidence?.geospatial ? `GeoTIFF (${result.visual_evidence.geospatial.crs})` : 'Optical Layer'}
+                </span>
               </div>
 
               {/* Crosshair on hover */}

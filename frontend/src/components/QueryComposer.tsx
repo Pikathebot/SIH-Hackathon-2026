@@ -1,5 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { QueryImage, Modality } from '../types/contract';
+import { generatePreview, isBrowserRenderable } from '../services/api';
 import { 
   Send, 
   Upload, 
@@ -12,7 +13,8 @@ import {
   ChevronDown,
   ChevronUp,
   X,
-  Eye
+  Eye,
+  Loader2
 } from 'lucide-react';
 
 interface QueryComposerProps {
@@ -60,18 +62,34 @@ export const QueryComposer: React.FC<QueryComposerProps> = ({
 
     filesToProcess.forEach((file, index) => {
       const reader = new FileReader();
-      reader.onload = (event) => {
+      reader.onload = async (event) => {
         const base64 = event.target?.result as string;
+        const imgId = `img_${Date.now()}_${index + 1}`;
+        const isRenderable = isBrowserRenderable(base64);
         const newImage: QueryImage = {
-          id: `img_${Date.now()}_${index + 1}`,
+          id: imgId,
           modality: 'optical',
           date: new Date().toISOString().split('T')[0],
           url_or_base64: base64,
-          previewUrl: base64,
+          previewUrl: isRenderable ? base64 : undefined,
           name: file.name,
         };
         setImages((prev) => [...prev, newImage].slice(0, 2));
         setShowImageDrawer(true);
+
+        // For TIFF, JP2 or any uploaded image, request backend PNG preview to guarantee browser display
+        try {
+          const previewRes = await generatePreview(base64);
+          if (previewRes?.preview_base64) {
+            setImages((prev) =>
+              prev.map((img) =>
+                img.id === imgId ? { ...img, previewUrl: previewRes.preview_base64 } : img
+              )
+            );
+          }
+        } catch {
+          // If preview call fails and original is not renderable, previewUrl remains undefined
+        }
       };
       reader.readAsDataURL(file);
     });
@@ -177,30 +195,49 @@ export const QueryComposer: React.FC<QueryComposerProps> = ({
                   className="flex items-center gap-3 p-3 bg-background border border-grid-hairline rounded-xl shadow-xs"
                 >
                   {/* Clickable Thumbnail with Lightbox */}
-                  <div
-                    onClick={() =>
-                      onPreviewImage?.(
-                        img.previewUrl || img.url_or_base64,
-                        img.name || `Image #${idx + 1}`,
-                        img.modality,
-                        img.date
-                      )
-                    }
-                    className="w-16 h-16 bg-surface-container border border-grid-hairline rounded-lg overflow-hidden flex-shrink-0 relative group cursor-pointer"
-                    title="Click to view full image"
-                  >
-                    <img
-                      src={img.previewUrl || img.url_or_base64}
-                      alt={img.name || `Image ${idx + 1}`}
-                      className="w-full h-full object-cover group-hover:scale-105 transition-transform"
-                    />
-                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
-                      <Eye className="w-4 h-4 text-white" />
-                    </div>
-                    <span className="absolute bottom-0 right-0 bg-surface-panel/90 text-[10px] font-medium px-1 rounded-tl-md border-t border-l border-grid-hairline text-amber-signal">
-                      #{idx + 1}
-                    </span>
-                  </div>
+                  {(() => {
+                    const safeThumb = (img.previewUrl && isBrowserRenderable(img.previewUrl))
+                      ? img.previewUrl
+                      : (isBrowserRenderable(img.url_or_base64) ? img.url_or_base64 : undefined);
+
+                    return (
+                      <div
+                        onClick={() => {
+                          if (safeThumb || img.url_or_base64) {
+                            onPreviewImage?.(
+                              safeThumb || img.url_or_base64,
+                              img.name || `Image #${idx + 1}`,
+                              img.modality,
+                              img.date
+                            );
+                          }
+                        }}
+                        className="w-16 h-16 bg-surface-container border border-grid-hairline rounded-lg overflow-hidden flex-shrink-0 relative group cursor-pointer flex items-center justify-center"
+                        title="Click to view full image"
+                      >
+                        {safeThumb ? (
+                          <img
+                            src={safeThumb}
+                            alt={img.name || `Image ${idx + 1}`}
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                          />
+                        ) : (
+                          <div className="flex flex-col items-center justify-center p-1 text-center">
+                            <Loader2 className="w-5 h-5 text-primary animate-spin" />
+                            <span className="text-[9px] text-text-muted mt-0.5">Processing</span>
+                          </div>
+                        )}
+                        {safeThumb && (
+                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                            <Eye className="w-4 h-4 text-white" />
+                          </div>
+                        )}
+                        <span className="absolute bottom-0 right-0 bg-surface-panel/90 text-[10px] font-medium px-1 rounded-tl-md border-t border-l border-grid-hairline text-amber-signal">
+                          #{idx + 1}
+                        </span>
+                      </div>
+                    );
+                  })()}
 
                   {/* Metadata Selectors */}
                   <div className="flex flex-col gap-1.5 flex-1 min-w-0">
@@ -299,7 +336,7 @@ export const QueryComposer: React.FC<QueryComposerProps> = ({
               ref={fileInputRef}
               onChange={handleFileUpload}
               multiple
-              accept="image/*"
+              accept="image/*,.tif,.tiff,.jp2,.j2k,.jpx,.jpc,.jpf"
               className="hidden"
             />
             <button

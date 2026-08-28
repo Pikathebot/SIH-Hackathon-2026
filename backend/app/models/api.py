@@ -27,15 +27,22 @@ class QueryRequest(BaseModel):
     images: list[ImageInput] = Field(..., min_length=1, max_length=2)
 
 
-# ---------------------------------------------------------------------------
-# Response models
-# ---------------------------------------------------------------------------
+class GeospatialMetadata(BaseModel):
+    """Geospatial bounding coordinates and projection metadata."""
+    crs: str = "EPSG:4326"
+    image_bounds: list[float]  # [min_lon, min_lat, max_lon, max_lat] in WGS84
+    secondary_image_bounds: Optional[list[float]] = None  # Secondary image WGS84 bounds for pairs
+    geo_boxes: Optional[list[list[list[float]]]] = None  # [[[lon, lat], ...]]
+    all_images_geo: Optional[list[dict]] = None
+
+
 class VisualEvidence(BaseModel):
     """Visual evidence block in query response."""
     type: str                                       # "none" | "bbox" | "mask"
     boxes: Optional[list[list[int]]] = None         # [[x1,y1,x2,y2], ...]
     mask_base64: Optional[str] = None
     overlay_base64: Optional[str] = None
+    geospatial: Optional[GeospatialMetadata] = None
 
 
 class ExecutionSummary(BaseModel):

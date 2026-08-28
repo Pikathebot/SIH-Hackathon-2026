@@ -7,9 +7,9 @@ import { LoadingTrace } from './components/LoadingTrace';
 import { QueryComposer } from './components/QueryComposer';
 import { ImageLightboxModal } from './components/ImageLightboxModal';
 import { DemoPresetSelector, DemoPreset } from './components/DemoPresetSelector';
-import { submitQuery } from './services/api';
+import { submitQuery, isBrowserRenderable } from './services/api';
 import { ChatMessage, AnalysisSession, QueryImage } from './types/contract';
-import { AlertOctagon, Sparkles, Globe2, Eye, Trash2, AlertTriangle, UploadCloud } from 'lucide-react';
+import { AlertOctagon, Sparkles, Globe2, Eye, Trash2, AlertTriangle, UploadCloud, Layers } from 'lucide-react';
 
 // ── Initial Clean Session State ──────────────────────────────────────────────
 const INITIAL_SESSION_ID = 'session-1';
@@ -284,43 +284,63 @@ const WorkspaceMain: React.FC = () => {
                     {/* Attached Uploaded Images — Clickable Gallery */}
                     {msg.images && msg.images.length > 0 && (
                       <div className="flex flex-wrap gap-2.5 pt-2 border-t border-grid-hairline/60">
-                        {msg.images.map((img, imgIdx) => (
-                          <div
-                            key={img.id || imgIdx}
-                            onClick={() =>
-                              setLightboxImage({
-                                url: img.previewUrl || img.url_or_base64,
-                                title: img.name || `Uploaded Image #${imgIdx + 1}`,
-                                modality: img.modality,
-                                date: img.date,
-                              })
-                            }
-                            className="group relative w-24 h-24 sm:w-28 sm:h-28 bg-background border border-grid-hairline rounded-xl overflow-hidden cursor-pointer shadow-xs hover:border-primary transition-all"
-                            title="Click to view full image"
-                          >
-                            <img
-                              src={img.previewUrl || img.url_or_base64}
-                              alt={img.name || `Image #${imgIdx + 1}`}
-                              className="w-full h-full object-cover group-hover:scale-105 transition-transform"
-                            />
-                            {/* Hover overlay with eye icon */}
-                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
-                              <Eye className="w-5 h-5 text-white" />
-                            </div>
+                        {msg.images.map((img, imgIdx) => {
+                          const safeUrl = (img.previewUrl && isBrowserRenderable(img.previewUrl))
+                            ? img.previewUrl
+                            : (isBrowserRenderable(img.url_or_base64) ? img.url_or_base64 : undefined);
 
-                            {/* Modality & Date Badge */}
-                            <div className="absolute bottom-0 inset-x-0 bg-black/75 backdrop-blur-xs text-[10px] px-1.5 py-0.5 text-text-primary flex items-center justify-between">
-                              <span className="capitalize text-amber-signal font-semibold truncate">
-                                {img.modality === 'sar' ? 'SAR' : 'Optical'}
-                              </span>
-                              {img.date && (
-                                <span className="text-text-muted truncate text-[9px]">
-                                  {img.date.slice(5)}
-                                </span>
+                          return (
+                            <div
+                              key={img.id || imgIdx}
+                              onClick={() => {
+                                if (safeUrl || img.url_or_base64) {
+                                  setLightboxImage({
+                                    url: safeUrl || img.url_or_base64,
+                                    title: img.name || `Uploaded Image #${imgIdx + 1}`,
+                                    modality: img.modality,
+                                    date: img.date,
+                                  });
+                                }
+                              }}
+                              className="group relative w-24 h-24 sm:w-28 sm:h-28 bg-background border border-grid-hairline rounded-xl overflow-hidden cursor-pointer shadow-xs hover:border-primary transition-all"
+                              title="Click to view full image"
+                            >
+                              {safeUrl ? (
+                                <img
+                                  src={safeUrl}
+                                  alt={img.name || `Image #${imgIdx + 1}`}
+                                  className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                                />
+                              ) : (
+                                <div className="w-full h-full flex flex-col items-center justify-center p-2 bg-surface-container text-center">
+                                  <Layers className="w-5 h-5 text-amber-signal animate-pulse" />
+                                  <span className="text-[10px] text-text-muted mt-1 truncate max-w-[80px]">
+                                    {img.name || 'Raster'}
+                                  </span>
+                                </div>
                               )}
+
+                              {/* Hover overlay with eye icon */}
+                              {safeUrl && (
+                                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                                  <Eye className="w-5 h-5 text-white" />
+                                </div>
+                              )}
+
+                              {/* Modality & Date Badge */}
+                              <div className="absolute bottom-0 inset-x-0 bg-black/75 backdrop-blur-xs text-[10px] px-1.5 py-0.5 text-text-primary flex items-center justify-between">
+                                <span className="capitalize text-amber-signal font-semibold truncate">
+                                  {img.modality === 'sar' ? 'SAR' : 'Optical'}
+                                </span>
+                                {img.date && (
+                                  <span className="text-text-muted truncate text-[9px]">
+                                    {img.date.slice(5)}
+                                  </span>
+                                )}
+                              </div>
                             </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
 

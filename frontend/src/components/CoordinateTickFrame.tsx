@@ -1,6 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { VisualEvidence } from '../types/contract';
 import { Crosshair, Layers, Maximize2 } from 'lucide-react';
+import { isBrowserRenderable } from '../services/api';
 
 interface CoordinateTickFrameProps {
   imageUrl?: string;
@@ -54,9 +55,11 @@ export const CoordinateTickFrame: React.FC<CoordinateTickFrameProps> = ({
     ? (visualEvidence.overlay_base64 || visualEvidence.mask_base64)
     : null;
 
+  const rawImage = imageUrl && isBrowserRenderable(imageUrl) ? imageUrl : undefined;
+
   const displayImage = maskSrc 
     ? (maskSrc.startsWith('data:') ? maskSrc : `data:image/png;base64,${maskSrc}`)
-    : imageUrl;
+    : rawImage;
 
   return (
     <div className="flex flex-col gap-1.5 w-full">

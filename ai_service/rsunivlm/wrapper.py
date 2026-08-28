@@ -5,6 +5,8 @@ Implements the exact signatures and TypedDict shapes from AI_SERVICE_CONTRACT.md
 
 import os
 from typing import Literal, Optional
+import cv2
+import numpy as np
 from PIL import Image
 
 from ai_service.common.types import (
@@ -21,6 +23,7 @@ from ai_service.rsunivlm.inference import (
     parse_segmentation_output,
     parse_bounding_boxes,
     create_overlay_image,
+    extract_water_spectral_mask,
     image_to_base64,
     mask_to_base64,
 )
@@ -71,7 +74,7 @@ def run_vqa(image: Image.Image, question: str) -> VQAResult:
 
     tokenizer, model, processor = _get_model()
     prompt = f"[VQA] {question.strip()}"
-    answer_text, latency_ms = run_raw_inference(
+    answer_text, latency_ms, logit_conf = run_raw_inference(
         model=model,
         tokenizer=tokenizer,
         image_processor=processor,
@@ -80,15 +83,18 @@ def run_vqa(image: Image.Image, question: str) -> VQAResult:
         max_new_tokens=256,
     )
 
+    conf = round(logit_conf, 2) if logit_conf is not None else 0.85
+    conf_source = "model_softmax" if logit_conf is not None else "heuristic"
+
     return {
         "answer": answer_text if answer_text else "No response generated.",
-        "confidence": 0.85,
+        "confidence": conf,
         "meta": {
             "tool_used": "rsunivlm_vqa",
             "parameters": {
                 "prompt_tag": "[VQA]",
                 "question": question,
-                "confidence_source": "heuristic",
+                "confidence_source": conf_source,
             },
             "latency_ms": latency_ms,
         },
@@ -107,7 +113,7 @@ def run_captioning(image: Image.Image) -> CaptioningResult:
 
     tokenizer, model, processor = _get_model()
     prompt = "[CAP] Describe this image briefly."
-    caption_text, latency_ms = run_raw_inference(
+    caption_text, latency_ms, logit_conf = run_raw_inference(
         model=model,
         tokenizer=tokenizer,
         image_processor=processor,
@@ -116,14 +122,17 @@ def run_captioning(image: Image.Image) -> CaptioningResult:
         max_new_tokens=256,
     )
 
+    conf = round(logit_conf, 2) if logit_conf is not None else 0.80
+    conf_source = "model_softmax" if logit_conf is not None else "heuristic"
+
     return {
         "caption": caption_text if caption_text else "Land cover scene observed.",
-        "confidence": 0.80,
+        "confidence": conf,
         "meta": {
             "tool_used": "rsunivlm_cap",
             "parameters": {
                 "prompt_tag": "[CAP]",
-                "confidence_source": "heuristic",
+                "confidence_source": conf_source,
             },
             "latency_ms": latency_ms,
         },
@@ -151,7 +160,7 @@ def run_detection(
     q_lower = query.lower()
 
     if mode == "auto":
-        if any(w in q_lower for w in ["highlight", "segment", "mask"]):
+        if any(w in q_lower for w in ["highlight", "segment", "mask", "boundary", "outline", "delineate", "water", "river", "lake", "flood", "ocean", "sea", "reservoir"]):
             resolved_mode = "mask"
         elif any(w in q_lower for w in ["where", "locate", "find", "box"]):
             resolved_mode = "bbox"
@@ -165,7 +174,7 @@ def run_detection(
     if resolved_mode == "bbox":
         # Format VG prompt
         prompt = f"[VG] {query.strip()}" if not query.strip().startswith("[") else query.strip()
-        text_out, latency_ms = run_raw_inference(
+        text_out, latency_ms, logit_conf = run_raw_inference(
             model=model,
             tokenizer=tokenizer,
             image_processor=processor,
@@ -180,19 +189,22 @@ def run_detection(
             w, h = image.size
             boxes = [[int(0.2 * w), int(0.2 * h), int(0.8 * w), int(0.8 * h)]]
 
+        conf = round(logit_conf, 2) if logit_conf is not None else 0.75
+        conf_source = "model_softmax" if logit_conf is not None else "heuristic"
+
         return {
             "mode": "bbox",
             "boxes": boxes,
             "mask_base64": None,
             "overlay_base64": None,
-            "confidence": 0.75,
+            "confidence": conf,
             "meta": {
                 "tool_used": "rsunivlm_vg",
                 "parameters": {
                     "prompt_tag": "[VG]",
                     "resolved_mode": "bbox",
                     "raw_output": text_out[:100],
-                    "confidence_source": "heuristic",
+                    "confidence_source": conf_source,
                 },
                 "latency_ms": latency_ms,
             },
@@ -200,40 +212,53 @@ def run_detection(
     else:
         # Format SEG prompt
         prompt = f"[SEG] {query.strip()}" if not query.strip().startswith("[") else query.strip()
-        text_out, latency_ms = run_raw_inference(
+        text_out, latency_ms, logit_conf = run_raw_inference(
             model=model,
             tokenizer=tokenizer,
             image_processor=processor,
             images=[image],
             message=prompt,
-            max_new_tokens=1024,
+            max_new_tokens=512,
         )
 
+        is_water_query = any(w in q_lower for w in ["water", "river", "lake", "flood", "reservoir", "ocean", "sea", "stream"])
         binary_mask, labels = parse_segmentation_output(text_out, image.size)
-        if binary_mask is not None:
-            overlay_pil = create_overlay_image(image, binary_mask, color=(0, 0, 255), alpha=0.5)
+
+        # Enhance with spectral NDWI mask for water body queries
+        if is_water_query:
+            spectral_water = extract_water_spectral_mask(image)
+            if binary_mask is not None:
+                binary_mask = cv2.bitwise_or(binary_mask, spectral_water)
+            else:
+                binary_mask = spectral_water
+            labels.add("water")
+
+        if binary_mask is not None and np.any(binary_mask > 0):
+            overlay_pil = create_overlay_image(image, binary_mask, color=(0, 120, 255), alpha=0.5)
             mask_b64 = mask_to_base64(binary_mask)
             overlay_b64 = image_to_base64(overlay_pil)
         else:
             # Fallback 1-pixel empty mask if parsing token stream yields no objects
-            import numpy as np
             empty_mask = np.zeros((image.size[1], image.size[0]), dtype=np.uint8)
             mask_b64 = mask_to_base64(empty_mask)
             overlay_b64 = image_to_base64(image)
+
+        conf = round(logit_conf, 2) if logit_conf is not None else (0.84 if is_water_query else 0.75)
+        conf_source = "model_softmax" if logit_conf is not None else "heuristic"
 
         return {
             "mode": "mask",
             "boxes": None,
             "mask_base64": mask_b64,
             "overlay_base64": overlay_b64,
-            "confidence": 0.75,
+            "confidence": conf,
             "meta": {
                 "tool_used": "rsunivlm_seg",
                 "parameters": {
                     "prompt_tag": "[SEG]",
                     "resolved_mode": "mask",
                     "detected_labels": list(labels) if labels else [],
-                    "confidence_source": "heuristic",
+                    "confidence_source": conf_source,
                 },
                 "latency_ms": latency_ms,
             },
@@ -260,7 +285,7 @@ def run_change_detection(
     q_text = query.strip() if query else "Please briefly describe the changes in these two images."
     prompt = f"[CCD] {q_text}" if not q_text.startswith("[") else q_text
 
-    text_out, latency_ms = run_raw_inference(
+    text_out, latency_ms, logit_conf = run_raw_inference(
         model=model,
         tokenizer=tokenizer,
         image_processor=processor,
@@ -285,17 +310,20 @@ def run_change_detection(
         mask_b64 = None
         overlay_b64 = None
 
+    conf = round(logit_conf, 2) if logit_conf is not None else 0.78
+    conf_source = "model_softmax" if logit_conf is not None else "heuristic"
+
     return {
         "answer": text_out if text_out else "Changes detected between the two timeframes.",
         "mask_base64": mask_b64,
         "overlay_base64": overlay_b64,
-        "confidence": 0.78,
+        "confidence": conf,
         "meta": {
             "tool_used": "rsunivlm_ccd",
             "parameters": {
                 "prompt_tag": "[CCD]",
                 "query": query,
-                "confidence_source": "heuristic",
+                "confidence_source": conf_source,
             },
             "latency_ms": latency_ms,
         },
