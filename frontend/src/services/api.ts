@@ -127,21 +127,31 @@ export async function generatePreview(urlOrBase64: string): Promise<PreviewResul
 
 /**
  * Checks if a given image URL or data URI is natively renderable by standard web browsers.
- * Raw GeoTIFFs (image/tiff) and JPEG 2000 (image/jp2) cannot be rendered directly in <img> tags.
+ * Uses a strict whitelist: only PNG, JPEG, WebP, GIF, SVG, Blob, and HTTP URLs.
+ * Raw GeoTIFFs, BigTIFFs, JPEG 2000, and octet-streams are NOT directly renderable in <img> tags.
  */
 export function isBrowserRenderable(url?: string): boolean {
   if (!url) return false;
-  const lower = url.toLowerCase();
-  if (lower.startsWith('data:image/tiff') || lower.startsWith('data:image/tif')) return false;
-  if (
-    lower.startsWith('data:image/jp2') ||
-    lower.startsWith('data:image/jpx') ||
-    lower.startsWith('data:image/j2k') ||
-    lower.startsWith('data:image/jpeg2000') ||
-    lower.startsWith('data:image/jpc')
-  ) {
-    return false;
+  const trimmed = url.trim();
+  const lower = trimmed.toLowerCase();
+
+  // Web URLs and Blob URLs
+  if (lower.startsWith('http://') || lower.startsWith('https://') || lower.startsWith('blob:')) {
+    return true;
   }
-  if (lower.startsWith('data:application/octet-stream')) return false;
-  return true;
+
+  // Strictly web-renderable data URIs
+  if (
+    lower.startsWith('data:image/png') ||
+    lower.startsWith('data:image/jpeg') ||
+    lower.startsWith('data:image/jpg') ||
+    lower.startsWith('data:image/webp') ||
+    lower.startsWith('data:image/gif') ||
+    lower.startsWith('data:image/svg+xml')
+  ) {
+    return true;
+  }
+
+  // All other formats (TIFF, JP2, binary streams) require backend /api/v1/preview conversion
+  return false;
 }

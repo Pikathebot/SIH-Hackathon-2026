@@ -58,7 +58,7 @@ export const QueryComposer: React.FC<QueryComposerProps> = ({
       return;
     }
 
-    const MAX_FILE_SIZE_MB = 50;
+    const MAX_FILE_SIZE_MB = 150;
     const filesToProcess = Array.from(files).slice(0, remainingSlots);
 
     filesToProcess.forEach((file, index) => {
