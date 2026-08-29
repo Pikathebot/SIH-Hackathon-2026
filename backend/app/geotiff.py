@@ -7,13 +7,16 @@ Handles:
 3. Radiometric normalization (robust 2%-98% percentile linear stretch).
 4. Spatial reference & CRS re-projection to WGS84 (EPSG:4326).
 5. Forward projection: Pixel bounding boxes -> WGS84 GeoJSON polygons.
+6. Windowed block reading for high-resolution sliding-window inference.
 """
 
+from contextlib import contextmanager
 from dataclasses import dataclass
 import io
 import logging
+from pathlib import Path
 import re
-from typing import List, Optional, Tuple, Union
+from typing import Generator, List, Optional, Tuple, Union
 import numpy as np
 from PIL import Image
 
@@ -44,8 +47,20 @@ class GeoMetadata:
     band_resolution_warning: Optional[str] = None
 
 
-def is_geotiff(data_bytes: bytes) -> bool:
-    """Checks if raw bytes start with a valid TIFF/GeoTIFF or JPEG 2000 (JP2) header."""
+def is_geotiff(data_or_path: Union[bytes, str, Path]) -> bool:
+    """Checks if raw bytes or a file path start with a valid TIFF/GeoTIFF or JPEG 2000 (JP2) header."""
+    if isinstance(data_or_path, (str, Path)):
+        p = Path(data_or_path)
+        if not p.exists() or not p.is_file():
+            return False
+        try:
+            with open(p, "rb") as f:
+                header = f.read(16)
+            return any(header.startswith(m) for m in _GEORASTER_MAGIC)
+        except Exception:
+            return False
+
+    data_bytes = data_or_path
     if len(data_bytes) < 4:
         return False
     return any(data_bytes.startswith(m) for m in _GEORASTER_MAGIC)
@@ -104,7 +119,7 @@ def _resolve_rgb_bands(src) -> Tuple[Tuple[int, int, int], str, Optional[str]]:
             r_idx = interps.index(ColorInterp.red) + 1
             g_idx = interps.index(ColorInterp.green) + 1
             b_idx = interps.index(ColorInterp.blue) + 1
-            logger.info("GeoTIFF band resolution [Tier 1: colorinterp] -> R:%d, G:%d, B:%d", r_idx, g_idx, b_idx)
+            logger.debug("GeoTIFF band resolution [Tier 1: colorinterp] -> R:%d, G:%d, B:%d", r_idx, g_idx, b_idx)
             return ((r_idx, g_idx, b_idx), "colorinterp", None)
     except Exception as e:
         logger.debug("ColorInterp inspection skipped: %s", e)
@@ -138,18 +153,18 @@ def _resolve_rgb_bands(src) -> Tuple[Tuple[int, int, int], str, Optional[str]]:
                 b_match = i
 
         if r_match and g_match and b_match and len({r_match, g_match, b_match}) == 3:
-            logger.info("GeoTIFF band resolution [Tier 2: band_description_match] -> R:%d, G:%d, B:%d", r_match, g_match, b_match)
+            logger.debug("GeoTIFF band resolution [Tier 2: band_description_match] -> R:%d, G:%d, B:%d", r_match, g_match, b_match)
             return ((r_match, g_match, b_match), "band_description_match", None)
     except Exception as e:
         logger.debug("Band description matching skipped: %s", e)
 
     # ── Tier 3: Sentinel-2 Full Stack Heuristic (n_bands >= 12) ─────
     if n_bands >= 12:
-        logger.info("GeoTIFF band resolution [Tier 3: sentinel2_full_stack_heuristic] -> R:4, G:3, B:2")
+        logger.debug("GeoTIFF band resolution [Tier 3: sentinel2_full_stack_heuristic] -> R:4, G:3, B:2")
         return ((4, 3, 2), "sentinel2_full_stack_heuristic", None)
 
     # ── Tier 4: Default for 3/4-band stacks (standard RGB/RGBN/RGBA) ─
-    logger.info("GeoTIFF band resolution [Tier 4: default_123] -> R:1, G:2, B:3 (unverified fallback)")
+    logger.debug("GeoTIFF band resolution [Tier 4: default_123] -> R:1, G:2, B:3 (unverified fallback)")
     warning_msg = (
         "No photometric or band description metadata found in GeoTIFF. "
         "Rendered with default [1:Red, 2:Green, 3:Blue] channel ordering."
@@ -157,12 +172,164 @@ def _resolve_rgb_bands(src) -> Tuple[Tuple[int, int, int], str, Optional[str]]:
     return ((1, 2, 3), "default_123", warning_msg)
 
 
+@contextmanager
+def open_georaster(source: Union[bytes, str, Path]) -> Generator:
+    """
+    Context manager yielding an open Rasterio DatasetReader from either
+    in-memory bytes or a file path on disk.
+    """
+    import rasterio
+    from rasterio.io import MemoryFile
+
+    if isinstance(source, (str, Path)):
+        p = Path(source)
+        with rasterio.open(str(p)) as src:
+            yield src
+    else:
+        with MemoryFile(source) as memfile:
+            with memfile.open() as src:
+                yield src
+
+
+def get_geotiff_info(source: Union[bytes, str, Path]) -> Optional[GeoMetadata]:
+    """
+    Extracts geospatial metadata and dimensions without reading the full raster pixels.
+    """
+    from rasterio.warp import transform_bounds
+    import pyproj
+
+    try:
+        with open_georaster(source) as src:
+            width = src.width
+            height = src.height
+            crs_obj = src.crs
+            transform = src.transform
+
+            (r_idx, g_idx, b_idx), band_tier, band_warn = _resolve_rgb_bands(src)
+
+            bounds_list = [
+                float(round(src.bounds.left, 6)),
+                float(round(src.bounds.bottom, 6)),
+                float(round(src.bounds.right, 6)),
+                float(round(src.bounds.top, 6)),
+            ]
+            src_crs_str = crs_obj.to_string() if crs_obj else "EPSG:4326"
+
+            if crs_obj:
+                try:
+                    wgs84_bounds = transform_bounds(
+                        crs_obj,
+                        pyproj.CRS.from_epsg(4326),
+                        src.bounds.left,
+                        src.bounds.bottom,
+                        src.bounds.right,
+                        src.bounds.top,
+                    )
+                    bounds_list = [
+                        float(round(wgs84_bounds[0], 6)),
+                        float(round(wgs84_bounds[1], 6)),
+                        float(round(wgs84_bounds[2], 6)),
+                        float(round(wgs84_bounds[3], 6)),
+                    ]
+                except Exception as e:
+                    logger.debug("Reprojection to WGS84 failed: %s", e)
+
+            return GeoMetadata(
+                crs=src_crs_str,
+                image_bounds=bounds_list,
+                affine_transform=(
+                    transform.a,
+                    transform.b,
+                    transform.c,
+                    transform.d,
+                    transform.e,
+                    transform.f,
+                ),
+                raw_size=(width, height),
+                scaled_size=(width, height),
+                scale_factor=(1.0, 1.0),
+                band_resolution_tier=band_tier,
+                band_resolution_warning=band_warn,
+            )
+    except Exception as exc:
+        logger.debug("Failed to extract GeoTIFF info: %s", exc)
+        return None
+
+
+def read_geotiff_window(
+    source: Union[bytes, str, Path],
+    col_off: int,
+    row_off: int,
+    width: int,
+    height: int,
+    out_shape: Optional[Tuple[int, int]] = None,
+) -> Optional[Image.Image]:
+    """
+    Reads a specific bounding window from a GeoTIFF raster, resolves bands,
+    normalizes to uint8, and returns a PIL RGB Image.
+    """
+    import rasterio.windows
+    from rasterio.enums import Resampling
+
+    try:
+        with open_georaster(source) as src:
+            window = rasterio.windows.Window(col_off, row_off, width, height)
+            n_bands = src.count
+
+            if n_bands >= 3:
+                (r_idx, g_idx, b_idx), _, _ = _resolve_rgb_bands(src)
+                if out_shape:
+                    r = src.read(r_idx, window=window, out_shape=out_shape, resampling=Resampling.bilinear)
+                    g = src.read(g_idx, window=window, out_shape=out_shape, resampling=Resampling.bilinear)
+                    b = src.read(b_idx, window=window, out_shape=out_shape, resampling=Resampling.bilinear)
+                else:
+                    r = src.read(r_idx, window=window)
+                    g = src.read(g_idx, window=window)
+                    b = src.read(b_idx, window=window)
+
+                r_u8 = normalize_band_percentile(r)
+                g_u8 = normalize_band_percentile(g)
+                b_u8 = normalize_band_percentile(b)
+                rgb_array = np.stack([r_u8, g_u8, b_u8], axis=-1)
+                return Image.fromarray(rgb_array, mode="RGB")
+
+            elif n_bands == 2:
+                if out_shape:
+                    b1 = src.read(1, window=window, out_shape=out_shape, resampling=Resampling.bilinear)
+                    b2 = src.read(2, window=window, out_shape=out_shape, resampling=Resampling.bilinear)
+                else:
+                    b1 = src.read(1, window=window)
+                    b2 = src.read(2, window=window)
+
+                b1_u8 = normalize_band_percentile(b1)
+                b2_u8 = normalize_band_percentile(b2)
+                eps = 1e-6
+                ratio = (b1.astype(np.float32) + eps) / (b2.astype(np.float32) + eps)
+                ratio_u8 = normalize_band_percentile(ratio)
+                rgb_array = np.stack([b1_u8, b2_u8, ratio_u8], axis=-1)
+                return Image.fromarray(rgb_array, mode="RGB")
+
+            else:
+                if out_shape:
+                    b1 = src.read(1, window=window, out_shape=out_shape, resampling=Resampling.bilinear)
+                else:
+                    b1 = src.read(1, window=window)
+
+                b1_u8 = normalize_band_percentile(b1)
+                rgb_array = np.stack([b1_u8, b1_u8, b1_u8], axis=-1)
+                return Image.fromarray(rgb_array, mode="RGB")
+
+    except Exception as exc:
+        logger.warning("Failed to read window [%d, %d, %d, %d]: %s", col_off, row_off, width, height, exc)
+        return None
+
+
 def process_geotiff(
-    data_bytes: bytes,
+    source: Union[bytes, str, Path],
     max_dim: int = 2048,
 ) -> Tuple[Image.Image, Optional[GeoMetadata]]:
     """
-    Decodes raw GeoTIFF or JPEG 2000 (JP2) bytes into a normalized 8-bit RGB PIL.Image and
+    Decodes raw GeoTIFF or JPEG 2000 (JP2) bytes/file into a normalized 8-bit RGB PIL.Image and
     extracts geospatial metadata (CRS, WGS84 bounding box, Affine transform).
 
     Uses fast hardware/wavelet decimated sub-sampling for large raster tiles (> max_dim).
@@ -170,140 +337,140 @@ def process_geotiff(
     Returns:
         (pil_image, geo_metadata)
     """
-    import rasterio
     from rasterio.enums import Resampling
-    from rasterio.io import MemoryFile
     from rasterio.warp import transform_bounds
     import pyproj
 
     try:
-        with MemoryFile(data_bytes) as memfile:
-            with memfile.open() as src:
-                n_bands = src.count
-                width = src.width
-                height = src.height
-                crs_obj = src.crs
-                transform = src.transform
+        with open_georaster(source) as src:
+            n_bands = src.count
+            width = src.width
+            height = src.height
+            crs_obj = src.crs
+            transform = src.transform
 
-                # 1. Determine read shape with fast decimation for large tiles
-                orig_size = (width, height)
-                if max(width, height) > max_dim:
-                    if width >= height:
-                        out_w = max_dim
-                        out_h = max(1, int(height * (max_dim / width)))
-                    else:
-                        out_h = max_dim
-                        out_w = max(1, int(width * (max_dim / height)))
-                    read_shape = (out_h, out_w)
-                    scaled_size = (out_w, out_h)
-                    scale_x = width / float(out_w)
-                    scale_y = height / float(out_h)
+            # 1. Determine read shape with fast decimation for large tiles
+            orig_size = (width, height)
+            if max(width, height) > max_dim:
+                if width >= height:
+                    out_w = max_dim
+                    out_h = max(1, int(height * (max_dim / width)))
                 else:
-                    read_shape = None
-                    scaled_size = orig_size
-                    scale_x = 1.0
-                    scale_y = 1.0
+                    out_h = max_dim
+                    out_w = max(1, int(width * (max_dim / height)))
+                read_shape = (out_h, out_w)
+                scaled_size = (out_w, out_h)
+                scale_x = width / float(out_w)
+                scale_y = height / float(out_h)
+            else:
+                read_shape = None
+                scaled_size = orig_size
+                scale_x = 1.0
+                scale_y = 1.0
 
-                # 2. Read bands with dynamic resolution chain
-                band_resolution_tier = None
-                band_resolution_warning = None
-                if n_bands >= 3:
-                    (r_idx, g_idx, b_idx), band_resolution_tier, band_resolution_warning = _resolve_rgb_bands(src)
-                    if read_shape:
-                        r = src.read(r_idx, out_shape=read_shape, resampling=Resampling.bilinear)
-                        g = src.read(g_idx, out_shape=read_shape, resampling=Resampling.bilinear)
-                        b = src.read(b_idx, out_shape=read_shape, resampling=Resampling.bilinear)
-                    else:
-                        r = src.read(r_idx)
-                        g = src.read(g_idx)
-                        b = src.read(b_idx)
-
-                    r_u8 = normalize_band_percentile(r)
-                    g_u8 = normalize_band_percentile(g)
-                    b_u8 = normalize_band_percentile(b)
-                    rgb_array = np.stack([r_u8, g_u8, b_u8], axis=-1)
-                    pil_img = Image.fromarray(rgb_array, mode="RGB")
-
-                elif n_bands == 2:
-                    if read_shape:
-                        b1 = src.read(1, out_shape=read_shape, resampling=Resampling.bilinear)
-                        b2 = src.read(2, out_shape=read_shape, resampling=Resampling.bilinear)
-                    else:
-                        b1 = src.read(1)
-                        b2 = src.read(2)
-
-                    b1_u8 = normalize_band_percentile(b1)
-                    b2_u8 = normalize_band_percentile(b2)
-                    eps = 1e-6
-                    ratio = (b1.astype(np.float32) + eps) / (b2.astype(np.float32) + eps)
-                    ratio_u8 = normalize_band_percentile(ratio)
-                    rgb_array = np.stack([b1_u8, b2_u8, ratio_u8], axis=-1)
-                    pil_img = Image.fromarray(rgb_array, mode="RGB")
-                    band_resolution_tier = "sar_dual_polarization"
-
+            # 2. Read bands with dynamic resolution chain
+            band_resolution_tier = None
+            band_resolution_warning = None
+            if n_bands >= 3:
+                (r_idx, g_idx, b_idx), band_resolution_tier, band_resolution_warning = _resolve_rgb_bands(src)
+                if read_shape:
+                    r = src.read(r_idx, out_shape=read_shape, resampling=Resampling.bilinear)
+                    g = src.read(g_idx, out_shape=read_shape, resampling=Resampling.bilinear)
+                    b = src.read(b_idx, out_shape=read_shape, resampling=Resampling.bilinear)
                 else:
-                    if read_shape:
-                        b1 = src.read(1, out_shape=read_shape, resampling=Resampling.bilinear)
-                    else:
-                        b1 = src.read(1)
+                    r = src.read(r_idx)
+                    g = src.read(g_idx)
+                    b = src.read(b_idx)
 
-                    b1_u8 = normalize_band_percentile(b1)
-                    rgb_array = np.stack([b1_u8, b1_u8, b1_u8], axis=-1)
-                    pil_img = Image.fromarray(rgb_array, mode="RGB")
-                    band_resolution_tier = "single_band_grayscale"
+                r_u8 = normalize_band_percentile(r)
+                g_u8 = normalize_band_percentile(g)
+                b_u8 = normalize_band_percentile(b)
+                rgb_array = np.stack([r_u8, g_u8, b_u8], axis=-1)
+                pil_img = Image.fromarray(rgb_array, mode="RGB")
 
-                # 3. Extract Geospatial Coordinates
-                geo_meta = None
-                if crs_obj:
-                    src_crs_str = crs_obj.to_string()
-                    try:
-                        wgs84_bounds = transform_bounds(
-                            crs_obj,
-                            pyproj.CRS.from_epsg(4326),
-                            src.bounds.left,
-                            src.bounds.bottom,
-                            src.bounds.right,
-                            src.bounds.top,
-                        )
-                        bounds_list = [
-                            float(round(wgs84_bounds[0], 6)),  # min_lon
-                            float(round(wgs84_bounds[1], 6)),  # min_lat
-                            float(round(wgs84_bounds[2], 6)),  # max_lon
-                            float(round(wgs84_bounds[3], 6)),  # max_lat
-                        ]
-                    except Exception as e:
-                        logger.warning("Failed to project bounds to WGS84: %s", e)
-                        bounds_list = [
-                            float(round(src.bounds.left, 6)),
-                            float(round(src.bounds.bottom, 6)),
-                            float(round(src.bounds.right, 6)),
-                            float(round(src.bounds.top, 6)),
-                        ]
+            elif n_bands == 2:
+                if read_shape:
+                    b1 = src.read(1, out_shape=read_shape, resampling=Resampling.bilinear)
+                    b2 = src.read(2, out_shape=read_shape, resampling=Resampling.bilinear)
+                else:
+                    b1 = src.read(1)
+                    b2 = src.read(2)
 
-                    geo_meta = GeoMetadata(
-                        crs=src_crs_str,
-                        image_bounds=bounds_list,
-                        affine_transform=(
-                            transform.a,
-                            transform.b,
-                            transform.c,
-                            transform.d,
-                            transform.e,
-                            transform.f,
-                        ),
-                        raw_size=orig_size,
-                        scaled_size=scaled_size,
-                        scale_factor=(scale_x, scale_y),
-                        band_resolution_tier=band_resolution_tier,
-                        band_resolution_warning=band_resolution_warning,
+                b1_u8 = normalize_band_percentile(b1)
+                b2_u8 = normalize_band_percentile(b2)
+                eps = 1e-6
+                ratio = (b1.astype(np.float32) + eps) / (b2.astype(np.float32) + eps)
+                ratio_u8 = normalize_band_percentile(ratio)
+                rgb_array = np.stack([b1_u8, b2_u8, ratio_u8], axis=-1)
+                pil_img = Image.fromarray(rgb_array, mode="RGB")
+                band_resolution_tier = "sar_dual_polarization"
+
+            else:
+                if read_shape:
+                    b1 = src.read(1, out_shape=read_shape, resampling=Resampling.bilinear)
+                else:
+                    b1 = src.read(1)
+
+                b1_u8 = normalize_band_percentile(b1)
+                rgb_array = np.stack([b1_u8, b1_u8, b1_u8], axis=-1)
+                pil_img = Image.fromarray(rgb_array, mode="RGB")
+                band_resolution_tier = "single_band_grayscale"
+
+            # 3. Extract Geospatial Coordinates
+            geo_meta = None
+            if crs_obj:
+                src_crs_str = crs_obj.to_string()
+                try:
+                    wgs84_bounds = transform_bounds(
+                        crs_obj,
+                        pyproj.CRS.from_epsg(4326),
+                        src.bounds.left,
+                        src.bounds.bottom,
+                        src.bounds.right,
+                        src.bounds.top,
                     )
+                    bounds_list = [
+                        float(round(wgs84_bounds[0], 6)),  # min_lon
+                        float(round(wgs84_bounds[1], 6)),  # min_lat
+                        float(round(wgs84_bounds[2], 6)),  # max_lon
+                        float(round(wgs84_bounds[3], 6)),  # max_lat
+                    ]
+                except Exception as e:
+                    logger.warning("Failed to project bounds to WGS84: %s", e)
+                    bounds_list = [
+                        float(round(src.bounds.left, 6)),
+                        float(round(src.bounds.bottom, 6)),
+                        float(round(src.bounds.right, 6)),
+                        float(round(src.bounds.top, 6)),
+                    ]
 
-                return pil_img, geo_meta
+                geo_meta = GeoMetadata(
+                    crs=src_crs_str,
+                    image_bounds=bounds_list,
+                    affine_transform=(
+                        transform.a,
+                        transform.b,
+                        transform.c,
+                        transform.d,
+                        transform.e,
+                        transform.f,
+                    ),
+                    raw_size=orig_size,
+                    scaled_size=scaled_size,
+                    scale_factor=(scale_x, scale_y),
+                    band_resolution_tier=band_resolution_tier,
+                    band_resolution_warning=band_resolution_warning,
+                )
+
+            return pil_img, geo_meta
 
     except Exception as e:
         logger.warning("Rasterio GeoTIFF/JP2 extraction failed: %s. Falling back to PIL.", e)
-        buf = io.BytesIO(data_bytes)
-        img = Image.open(buf).convert("RGB")
+        if isinstance(source, (str, Path)):
+            img = Image.open(source).convert("RGB")
+        else:
+            buf = io.BytesIO(source)
+            img = Image.open(buf).convert("RGB")
         if max(img.width, img.height) > max_dim:
             if img.width >= img.height:
                 nw = max_dim
@@ -347,13 +514,25 @@ def pixel_boxes_to_geo_polygons(
 
     polygons = []
 
+    raw_w, raw_h = geo_meta.raw_size
+    # Determine if input boxes are in [0, 1000] normalized space
+    is_normalized_1000 = False
+    if pixel_boxes:
+        max_coord = max(max(b[:4]) for b in pixel_boxes if len(b) >= 4)
+        if max_coord <= 1000 and max(raw_w, raw_h) > 1000:
+            is_normalized_1000 = True
+
     for box in pixel_boxes:
         if len(box) < 4:
             continue
         px1, py1, px2, py2 = box[:4]
 
-        rx1, ry1 = px1 * sx, py1 * sy
-        rx2, ry2 = px2 * sx, py2 * sy
+        if is_normalized_1000:
+            rx1, ry1 = (px1 / 1000.0) * raw_w, (py1 / 1000.0) * raw_h
+            rx2, ry2 = (px2 / 1000.0) * raw_w, (py2 / 1000.0) * raw_h
+        else:
+            rx1, ry1 = px1 * sx, py1 * sy
+            rx2, ry2 = px2 * sx, py2 * sy
 
         x_tl, y_tl = rasterio.transform.xy(src_transform, ry1, rx1, offset="center")
         x_tr, y_tr = rasterio.transform.xy(src_transform, ry1, rx2, offset="center")

@@ -221,12 +221,13 @@ def load_pretrained_model(model_path, model_base, model_name, load_8bit=False, l
                 model = LlavaLlamaForCausalLM.from_pretrained(model_path, low_cpu_mem_usage=True, attn_implementation=attn_implementation, config=llava_cfg, **kwargs)
 
             elif "qwen" in model_name.lower() or "quyen" in model_name.lower():
+                is_local = os.path.isdir(model_path) if isinstance(model_path, str) else False
                 try:
-                    tokenizer = AutoTokenizer.from_pretrained(model_path, use_fast=False)
+                    tokenizer = AutoTokenizer.from_pretrained(model_path, use_fast=False, local_files_only=is_local)
                 except Exception:
-                    tokenizer = AutoTokenizer.from_pretrained(model_path)
+                    tokenizer = AutoTokenizer.from_pretrained(model_path, local_files_only=is_local)
                 if "gmoe" in  model_name.lower():
-                    model = LlavaQwenGMoeForCausalLM.from_pretrained(model_path, low_cpu_mem_usage=True, attn_implementation=attn_implementation,trust_remote_code=True, **kwargs)
+                    model = LlavaQwenGMoeForCausalLM.from_pretrained(model_path, low_cpu_mem_usage=True, attn_implementation=attn_implementation,trust_remote_code=True, local_files_only=is_local, **kwargs)
 
                 elif "moe" in model_name.lower() or "A14B" in model_name.lower():
                     from llava.model.language_model.llava_qwen_moe import LlavaQwenMoeConfig

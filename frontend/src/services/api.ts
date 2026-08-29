@@ -155,3 +155,69 @@ export function isBrowserRenderable(url?: string): boolean {
   // All other formats (TIFF, JP2, binary streams) require backend /api/v1/preview conversion
   return false;
 }
+
+export interface UploadResult {
+  asset_id: string;
+  filename: string;
+  url: string;
+  preview_base64: string;
+  format: 'geotiff' | 'standard';
+  width: number;
+  height: number;
+  size_bytes: number;
+  geospatial?: {
+    crs: string;
+    image_bounds: [number, number, number, number];
+  } | null;
+}
+
+/**
+ * Stream large satellite imagery (>150MB to multi-GB GeoTIFFs) directly to server disk cache.
+ * Tracks upload percentage via XMLHttpRequest and returns lightweight browser preview.
+ */
+export function uploadLargeImage(
+  file: File,
+  onProgress?: (percent: number) => void
+): Promise<UploadResult> {
+  return new Promise((resolve, reject) => {
+    const endpoint = `${BASE_URL}/api/v1/upload`;
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', endpoint);
+
+    if (xhr.upload && onProgress) {
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable) {
+          const pct = Math.round((event.loaded / event.total) * 100);
+          onProgress(pct);
+        }
+      };
+    }
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          const res = JSON.parse(xhr.responseText) as UploadResult;
+          resolve(res);
+        } catch (e) {
+          reject(new Error('Failed to parse upload response.'));
+        }
+      } else {
+        try {
+          const err = JSON.parse(xhr.responseText);
+          reject(new Error(err.error?.message || `Upload failed with status ${xhr.status}`));
+        } catch {
+          reject(new Error(`Upload failed with status ${xhr.status}`));
+        }
+      }
+    };
+
+    xhr.onerror = () => {
+      reject(new Error('Network error during file upload.'));
+    };
+
+    xhr.send(formData);
+  });
+}

@@ -33,6 +33,15 @@ wheels/
 backend/data/*.db
 backend/data/images/*
 !backend/data/images/.gitkeep
+backend/data/uploads/*
+!backend/data/uploads/.gitkeep
+
+# Raw Satellite Archives & Sample Imagery
+*.SAFE
+*.SAFE/
+*.jp2
+sample.tif
+Screenshot*.png
 
 # Model weights and checkpoints
 *.pt

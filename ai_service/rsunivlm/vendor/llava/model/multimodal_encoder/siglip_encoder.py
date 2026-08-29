@@ -565,7 +565,26 @@ class SigLipVisionTower(nn.Module):
             rank0_print("{} is already loaded, `load_model` called again, skipping.".format(self.vision_tower_name))
             return
 
-        self.vision_tower = SigLipVisionModel.from_pretrained(self.vision_tower_name, device_map=device_map)
+        try:
+            # 1. Try local cache without pinging HuggingFace Hub
+            self.vision_tower = SigLipVisionModel.from_pretrained(
+                self.vision_tower_name,
+                device_map=device_map,
+                local_files_only=True
+            )
+        except Exception:
+            try:
+                # 2. Try online if local cache was not present
+                self.vision_tower = SigLipVisionModel.from_pretrained(
+                    self.vision_tower_name,
+                    device_map=device_map
+                )
+            except Exception:
+                # 3. Offline fallback: instantiate from config directly.
+                # All vision tower weights are contained in RSUniVLM's model.safetensors
+                # and will be populated by the parent LlavaQwenGMoeForCausalLM model.
+                rank0_print(f"Offline mode: initializing {self.vision_tower_name} directly from SigLipVisionConfig.")
+                self.vision_tower = SigLipVisionModel(self.config)
 
         del self.vision_tower.vision_model.encoder.layers[-1:]
         self.vision_tower.vision_model.head = nn.Identity()

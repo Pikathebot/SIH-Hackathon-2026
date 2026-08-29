@@ -52,6 +52,11 @@ def load_rsunivlm_model(
             detail="Ensure RSUNIVLM_CHECKPOINT_PATH points to a valid weights directory.",
         )
 
+    # If local checkpoint directory is provided, ensure offline mode to avoid hub timeouts
+    if os.path.isdir(checkpoint_path):
+        os.environ.setdefault("HF_HUB_OFFLINE", "1")
+        os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model_name = "llava_qwen_gmoe"
     llava_model_args = {

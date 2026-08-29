@@ -21,7 +21,7 @@ from fastapi.responses import JSONResponse
 
 from app.database import init_db
 from app.models.api import ErrorDetail, ErrorResponse
-from app.routers import health_router, query_router, preview_router
+from app.routers import health_router, query_router, preview_router, upload_router
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -45,6 +45,8 @@ async def lifespan(app: FastAPI):
     # Ensure data directories exist
     data_dir = Path("backend/data/images")
     data_dir.mkdir(parents=True, exist_ok=True)
+    uploads_dir = Path("backend/data/uploads")
+    uploads_dir.mkdir(parents=True, exist_ok=True)
 
     # Initialize database
     await init_db()
@@ -90,6 +92,7 @@ app.add_middleware(
 app.include_router(health_router)
 app.include_router(query_router)
 app.include_router(preview_router)
+app.include_router(upload_router)
 
 
 # ---------------------------------------------------------------------------

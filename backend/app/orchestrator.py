@@ -16,8 +16,10 @@ import hashlib
 import io
 import json
 import logging
+import re
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional, Tuple
 
 from PIL import Image
@@ -29,6 +31,7 @@ from app.geotiff import (
     pixel_boxes_to_geo_polygons,
     process_geotiff,
 )
+from app.tiling import run_tiled_detection
 from app.models.api import (
     ExecutionSummary,
     GeospatialMetadata,
@@ -194,19 +197,6 @@ def validate_inputs(request: QueryRequest) -> None:
 # ---------------------------------------------------------------------------
 # Intent classification — orchestrator's job, not the AI modules'
 # ---------------------------------------------------------------------------
-_DETECTION_KEYWORDS = frozenset({
-    "where", "locate", "find", "box",
-    "highlight", "segment", "mask",
-    "detect", "identify", "show",
-})
-
-_CAPTIONING_KEYWORDS = frozenset({
-    "caption", "describe", "description",
-    "what is this", "what do you see",
-    "summarize", "summarise", "overview",
-})
-
-
 def classify_intent(request: QueryRequest) -> str:
     """
     Classify query intent → one of the canonical task values.
@@ -214,7 +204,8 @@ def classify_intent(request: QueryRequest) -> str:
     Values from CONTRACT.md §5: vqa | captioning | detection | change_detection | fusion
     """
     images = request.images
-    query_lower = request.query.lower()
+    query_raw = request.query.strip()
+    query_lower = query_raw.lower()
     modalities = sorted(img.modality for img in images)
 
     # Two-image tasks are determined purely by modality combination
@@ -224,13 +215,26 @@ def classify_intent(request: QueryRequest) -> str:
         if modalities == ["optical", "sar"]:
             return "fusion"
 
-    # Single-image: disambiguate by query text
-    # Check detection keywords
-    if any(kw in query_lower for kw in _DETECTION_KEYWORDS):
+    # Single-image: disambiguate by query structure and action intent
+
+    # 1. Explicit pixel segmentation / masking / bounding box actions always trigger detection
+    if re.search(r"\b(?:segment|segmentation|highlight|mask|bounding\s+box(?:es)?|draw\s+box(?:es)?)\b", query_lower):
         return "detection"
 
-    # Check captioning keywords
-    if any(kw in query_lower for kw in _CAPTIONING_KEYWORDS):
+    # 2. Natural descriptive/factual questions (What/Which/Why/How/Is/Are/Name/Can you...)
+    # Route to VQA unless the question explicitly asks "Where is/are..." (spatial localization)
+    is_question = bool(re.search(r"^(?:what|which|why|how|is\s+there|are\s+there|can\s+you|does|name\s+the|tell\s+me)\b", query_lower))
+    if is_question:
+        if re.search(r"\bwhere\s+(?:is|are)\b", query_lower):
+            return "detection"
+        return "vqa"
+
+    # 3. Detection & visual localization commands ("Locate the airport", "Find the river", "Where are the aircraft")
+    if re.search(r"\b(?:locate|find|detect|where)\b", query_lower):
+        return "detection"
+
+    # 4. Captioning commands ("Describe this scene", "Summarize the image", "Caption this")
+    if re.search(r"\b(?:caption|describe|description|summarize|summarise|overview|what\s+do\s+you\s+see|what\s+is\s+in\s+this\s+image)\b", query_lower):
         return "captioning"
 
     # Default: VQA
@@ -238,28 +242,66 @@ def classify_intent(request: QueryRequest) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Image decoding — base64/URL → PIL.Image at the API boundary
+# Image decoding — base64/URL/Asset → PIL.Image at the API boundary
 # AI modules work with PIL.Image.Image objects, never raw base64.
 # ---------------------------------------------------------------------------
 def _decode_image(url_or_base64: str) -> Tuple[Image.Image, Optional[GeoMetadata]]:
-    """Decode a base64 string or URL to a PIL Image and optional GeoMetadata."""
+    """Decode a base64 string, asset ID, local path, or URL to a PIL Image and optional GeoMetadata."""
     data = url_or_base64.strip()
 
-    # Handle data URI scheme (e.g. "data:image/png;base64,iVBOR...")
+    # 1. Handle local uploaded asset references (/api/v1/assets/ast_..., ast_...)
+    asset_id = None
+    if "/api/v1/assets/" in data:
+        asset_id = data.split("/api/v1/assets/")[-1].strip()
+    elif data.startswith("ast_"):
+        asset_id = data
+    elif data.startswith("assets/"):
+        asset_id = data.split("assets/")[-1].strip()
+
+    if asset_id:
+        upload_dirs = [Path("backend/data/uploads"), Path("data/uploads")]
+        matched_file = None
+        for u_dir in upload_dirs:
+            matches = list(u_dir.glob(f"{asset_id}.*"))
+            if matches and matches[0].exists():
+                matched_file = matches[0]
+                break
+
+        if matched_file:
+            img, geo_meta = process_geotiff(matched_file)
+            img._file_source = str(matched_file)
+            img._geo_meta = geo_meta
+            return img, geo_meta
+
+    # 2. Handle direct local file path if exists
+    try:
+        p = Path(data)
+        if p.exists() and p.is_file():
+            img, geo_meta = process_geotiff(p)
+            img._file_source = str(p)
+            img._geo_meta = geo_meta
+            return img, geo_meta
+    except Exception:
+        pass
+
+    # 3. Handle data URI scheme (e.g. "data:image/png;base64,iVBOR...")
     if data.startswith("data:"):
         _, _, after_comma = data.partition(",")
         data = after_comma
 
-    # Try base64 decode
+    # 4. Try base64 decode
     try:
         image_bytes = base64.b64decode(data)
         if is_geotiff(image_bytes):
-            return process_geotiff(image_bytes)
-        return Image.open(io.BytesIO(image_bytes)).convert("RGB"), None
+            img, geo_meta = process_geotiff(image_bytes)
+            img._geo_meta = geo_meta
+            return img, geo_meta
+        img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        return img, None
     except Exception:
         pass
 
-    # Try URL
+    # 5. Try URL
     if data.startswith(("http://", "https://")):
         try:
             import httpx
@@ -267,8 +309,11 @@ def _decode_image(url_or_base64: str) -> Tuple[Image.Image, Optional[GeoMetadata
             response.raise_for_status()
             image_bytes = response.content
             if is_geotiff(image_bytes):
-                return process_geotiff(image_bytes)
-            return Image.open(io.BytesIO(image_bytes)).convert("RGB"), None
+                img, geo_meta = process_geotiff(image_bytes)
+                img._geo_meta = geo_meta
+                return img, geo_meta
+            img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+            return img, None
         except Exception as exc:
             raise QueryValidationError(
                 code="UNSUPPORTED_FORMAT",
@@ -277,7 +322,7 @@ def _decode_image(url_or_base64: str) -> Tuple[Image.Image, Optional[GeoMetadata
 
     raise QueryValidationError(
         code="UNSUPPORTED_FORMAT",
-        message="Could not decode image. Provide a valid base64 string or HTTPS URL.",
+        message="Could not decode image. Provide a valid base64 string, asset ID, or HTTPS URL.",
     )
 
 
@@ -309,7 +354,24 @@ def _dispatch_ai_sync(
         return _run_captioning(decoded_images[0])
 
     elif task == "detection":
-        return _run_detection(decoded_images[0], request.query)
+        primary_img = decoded_images[0]
+        # Check if query is bounding box (VG) or segmentation (SEG)
+        from ai_service.rsunivlm.inference import resolve_detection_mode
+        resolved_mode = resolve_detection_mode(request.query)
+
+        file_src = getattr(primary_img, "_file_source", None)
+        geo_meta = getattr(primary_img, "_geo_meta", None)
+
+        if resolved_mode == "bbox" and file_src and geo_meta and max(geo_meta.raw_size) > 1024:
+            logger.info("Routing localized bbox detection through high-resolution tiled engine for %s", file_src)
+            return run_tiled_detection(
+                raster_source=file_src,
+                query=request.query,
+                detection_fn=_run_detection,
+                chip_size=1024,
+                overlap_ratio=0.15,
+            )
+        return _run_detection(primary_img, request.query)
 
     elif task == "change_detection":
         # Sort by date so earlier image = before, later = after

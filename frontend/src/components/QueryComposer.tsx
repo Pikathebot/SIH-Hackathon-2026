@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { QueryImage, Modality } from '../types/contract';
-import { generatePreview, isBrowserRenderable } from '../services/api';
+import { isBrowserRenderable, uploadLargeImage } from '../services/api';
 import { 
   Send, 
   Upload, 
@@ -37,6 +37,7 @@ export const QueryComposer: React.FC<QueryComposerProps> = ({
   const [query, setQuery] = useState(initialQuery);
   const [images, setImages] = useState<QueryImage[]>(initialImages);
   const [showImageDrawer, setShowImageDrawer] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<Record<string, number>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Sync when initialQuery/initialImages changes
@@ -58,53 +59,53 @@ export const QueryComposer: React.FC<QueryComposerProps> = ({
       return;
     }
 
-    const MAX_FILE_SIZE_MB = 150;
     const filesToProcess = Array.from(files).slice(0, remainingSlots);
 
-    filesToProcess.forEach((file, index) => {
-      const fileSizeMB = file.size / (1024 * 1024);
-      if (fileSizeMB > MAX_FILE_SIZE_MB) {
-        alert(
-          `File "${file.name}" is too large (${fileSizeMB.toFixed(1)} MB).\n\n` +
-          `Browser memory safety limit is ${MAX_FILE_SIZE_MB} MB per file.\n\n` +
-          `💡 Recommended alternatives:\n` +
-          `• Use the individual 10m bands from your Sentinel-2 SAFE archive (e.g. TCI_10m.jp2 or B08_10m.jp2, ~20–35 MB).\n` +
-          `• Or export an ROI sub-scene GeoTIFF from QGIS / ArcGIS under 50 MB.`
-        );
-        return;
-      }
+    filesToProcess.forEach(async (file, index) => {
+      const imgId = `img_${Date.now()}_${index + 1}`;
+      const fileSizeMB = (file.size / (1024 * 1024)).toFixed(1);
 
-      const reader = new FileReader();
-      reader.onload = async (event) => {
-        const base64 = event.target?.result as string;
-        const imgId = `img_${Date.now()}_${index + 1}`;
-        const isRenderable = isBrowserRenderable(base64);
-        const newImage: QueryImage = {
-          id: imgId,
-          modality: 'optical',
-          date: new Date().toISOString().split('T')[0],
-          url_or_base64: base64,
-          previewUrl: isRenderable ? base64 : undefined,
-          name: file.name,
-        };
-        setImages((prev) => [...prev, newImage].slice(0, 2));
-        setShowImageDrawer(true);
-
-        // For TIFF, JP2 or any uploaded image, request backend PNG preview to guarantee browser display
-        try {
-          const previewRes = await generatePreview(base64);
-          if (previewRes?.preview_base64) {
-            setImages((prev) =>
-              prev.map((img) =>
-                img.id === imgId ? { ...img, previewUrl: previewRes.preview_base64 } : img
-              )
-            );
-          }
-        } catch {
-          // If preview call fails and original is not renderable, previewUrl remains undefined
-        }
+      // Create placeholder image slot immediately in drawer
+      const newImage: QueryImage = {
+        id: imgId,
+        modality: 'optical',
+        date: new Date().toISOString().split('T')[0],
+        url_or_base64: '',
+        previewUrl: undefined,
+        name: `${file.name} (${fileSizeMB} MB)`,
       };
-      reader.readAsDataURL(file);
+      setImages((prev) => [...prev, newImage].slice(0, 2));
+      setShowImageDrawer(true);
+      setUploadProgress((prev) => ({ ...prev, [imgId]: 0 }));
+
+      try {
+        const uploadRes = await uploadLargeImage(file, (pct) => {
+          setUploadProgress((prev) => ({ ...prev, [imgId]: pct }));
+        });
+
+        // Once uploaded, set asset URL and server-generated preview
+        setImages((prev) =>
+          prev.map((img) =>
+            img.id === imgId
+              ? {
+                  ...img,
+                  url_or_base64: uploadRes.url,
+                  previewUrl: uploadRes.preview_base64,
+                  name: `${uploadRes.filename} (${fileSizeMB} MB)`,
+                }
+              : img
+          )
+        );
+      } catch (err: any) {
+        alert(`Failed to upload "${file.name}": ${err?.message || 'Upload failed'}`);
+        setImages((prev) => prev.filter((img) => img.id !== imgId));
+      } finally {
+        setUploadProgress((prev) => {
+          const next = { ...prev };
+          delete next[imgId];
+          return next;
+        });
+      }
     });
 
     if (fileInputRef.current) {
@@ -209,6 +210,7 @@ export const QueryComposer: React.FC<QueryComposerProps> = ({
                 >
                   {/* Clickable Thumbnail with Lightbox */}
                   {(() => {
+                    const isCurrentlyUploading = uploadProgress[img.id] !== undefined;
                     const safeThumb = (img.previewUrl && isBrowserRenderable(img.previewUrl))
                       ? img.previewUrl
                       : (isBrowserRenderable(img.url_or_base64) ? img.url_or_base64 : undefined);
@@ -216,7 +218,7 @@ export const QueryComposer: React.FC<QueryComposerProps> = ({
                     return (
                       <div
                         onClick={() => {
-                          if (safeThumb || img.url_or_base64) {
+                          if (!isCurrentlyUploading && (safeThumb || img.url_or_base64)) {
                             onPreviewImage?.(
                               safeThumb || img.url_or_base64,
                               img.name || `Image #${idx + 1}`,
@@ -226,9 +228,22 @@ export const QueryComposer: React.FC<QueryComposerProps> = ({
                           }
                         }}
                         className="w-16 h-16 bg-surface-container border border-grid-hairline rounded-lg overflow-hidden flex-shrink-0 relative group cursor-pointer flex items-center justify-center"
-                        title="Click to view full image"
+                        title={isCurrentlyUploading ? `Uploading ${uploadProgress[img.id]}%` : "Click to view full image"}
                       >
-                        {safeThumb ? (
+                        {isCurrentlyUploading ? (
+                          <div className="absolute inset-0 bg-black/80 flex flex-col items-center justify-center p-1.5 text-center">
+                            <Loader2 className="w-4 h-4 text-cyan-detection animate-spin" />
+                            <span className="text-[9px] text-cyan-detection font-bold font-mono mt-0.5">
+                              {uploadProgress[img.id]}%
+                            </span>
+                            <div className="w-full bg-white/20 h-1 rounded-full mt-1 overflow-hidden">
+                              <div
+                                className="bg-cyan-detection h-full transition-all duration-150"
+                                style={{ width: `${uploadProgress[img.id]}%` }}
+                              />
+                            </div>
+                          </div>
+                        ) : safeThumb ? (
                           <img
                             src={safeThumb}
                             alt={img.name || `Image ${idx + 1}`}
@@ -240,7 +255,7 @@ export const QueryComposer: React.FC<QueryComposerProps> = ({
                             <span className="text-[9px] text-text-muted mt-0.5">Processing</span>
                           </div>
                         )}
-                        {safeThumb && (
+                        {!isCurrentlyUploading && safeThumb && (
                           <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
                             <Eye className="w-4 h-4 text-white" />
                           </div>

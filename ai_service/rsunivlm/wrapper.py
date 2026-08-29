@@ -179,9 +179,7 @@ def run_detection(
 
         boxes = parse_bounding_boxes(text_out, image.size)
         if not boxes:
-            # Fallback box covering the center region if none detected
-            w, h = image.size
-            boxes = [[int(0.2 * w), int(0.2 * h), int(0.8 * w), int(0.8 * h)]]
+            boxes = []
 
         conf = round(logit_conf, 2) if logit_conf is not None else 0.75
         conf_source = "model_softmax" if logit_conf is not None else "heuristic"
