@@ -5,9 +5,13 @@ Trivial liveness check for local dev / demo rehearsal.
 Response shape per API_CONTRACT.md §1.
 """
 
+import asyncio
+
 from fastapi import APIRouter
 
 from app.models.api import HealthResponse
+from app.engines import engine_health
+from app import orchestrator
 from app.orchestrator import is_fusion_loaded, is_rsunivlm_loaded
 
 router = APIRouter(prefix="/api/v1", tags=["health"])
@@ -22,4 +26,5 @@ async def health_check() -> HealthResponse:
         status="ok",
         rsunivlm_loaded=is_rsunivlm_loaded(),
         fusion_loaded=is_fusion_loaded(),
+        engine=(await asyncio.to_thread(engine_health, orchestrator.ENGINE)) if orchestrator.ENGINE else None,
     )

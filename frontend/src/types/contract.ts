@@ -18,6 +18,11 @@ export type ToolUsed =
   | 'rsunivlm_vg' 
   | 'rsunivlm_seg' 
   | 'rsunivlm_ccd' 
+  | 'qwen_vl_vqa'
+  | 'qwen_vl_cap'
+  | 'qwen_vl_vg'
+  | 'qwen_vl_seg'
+  | 'qwen_vl_ccd'
   | 'fusion_classifier'
   | string;
 

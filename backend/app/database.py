@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS queries (
     query_text              TEXT NOT NULL,
     image_ids               TEXT NOT NULL,
     selected_task           TEXT NOT NULL CHECK(selected_task IN ('vqa', 'captioning', 'detection', 'change_detection', 'fusion')),
-    tool_used               TEXT NOT NULL CHECK(tool_used IN ('rsunivlm_vqa', 'rsunivlm_cap', 'rsunivlm_vg', 'rsunivlm_seg', 'rsunivlm_ccd', 'fusion_classifier')),
+    tool_used               TEXT NOT NULL CHECK(tool_used IN ('rsunivlm_vqa', 'rsunivlm_cap', 'rsunivlm_vg', 'rsunivlm_seg', 'rsunivlm_ccd', 'qwen_vl_vqa', 'qwen_vl_cap', 'qwen_vl_vg', 'qwen_vl_seg', 'qwen_vl_ccd', 'fusion_classifier')),
     parameters              TEXT,
     answer                  TEXT,
     confidence              REAL NOT NULL,

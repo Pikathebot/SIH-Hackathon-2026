@@ -30,7 +30,9 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1", tags=["upload"])
 
-UPLOAD_DIR = Path("backend/data/uploads")
+from app.config import UPLOADS_DIR
+
+UPLOAD_DIR = UPLOADS_DIR
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 # TTL for uploaded assets (2 hours in seconds)

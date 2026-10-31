@@ -317,7 +317,7 @@ def run_tiled_detection(
         "boxes": normalized_boxes,
         "confidence": float(round(avg_conf, 2)),
         "meta": {
-            "tool_used": sub_tool_used if sub_tool_used in ("rsunivlm_vg", "rsunivlm_seg") else "rsunivlm_vg",
+            "tool_used": sub_tool_used if sub_tool_used in ("rsunivlm_vg", "rsunivlm_seg", "qwen_vl_vg", "qwen_vl_seg") else "rsunivlm_vg",
             "parameters": {
                 "tiling": {
                     "enabled": True,

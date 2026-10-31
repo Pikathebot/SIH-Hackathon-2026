@@ -21,14 +21,19 @@ export const ExecutionSummaryPanel: React.FC<ExecutionSummaryPanelProps> = ({ su
   const getToolDisplayName = (tool: string) => {
     switch (tool) {
       case 'rsunivlm_vqa':
+      case 'qwen_vl_vqa':
         return 'Visual Question Answering';
       case 'rsunivlm_cap':
+      case 'qwen_vl_cap':
         return 'Image Captioning';
       case 'rsunivlm_vg':
+      case 'qwen_vl_vg':
         return 'Object Localization';
       case 'rsunivlm_seg':
+      case 'qwen_vl_seg':
         return 'Semantic Segmentation';
       case 'rsunivlm_ccd':
+      case 'qwen_vl_ccd':
         return 'Change Detection';
       case 'fusion_classifier':
         return 'Optical–Radar Fusion';

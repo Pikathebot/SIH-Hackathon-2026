@@ -43,10 +43,9 @@ async def lifespan(app: FastAPI):
     logger.info("Starting SatQuery AI backend...")
 
     # Ensure data directories exist
-    data_dir = Path("backend/data/images")
-    data_dir.mkdir(parents=True, exist_ok=True)
-    uploads_dir = Path("backend/data/uploads")
-    uploads_dir.mkdir(parents=True, exist_ok=True)
+    from app.config import IMAGES_DIR, UPLOADS_DIR
+    IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+    UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
     # Initialize database
     await init_db()

@@ -30,8 +30,16 @@ CANONICAL_TOOLS = {
     "rsunivlm_vg",
     "rsunivlm_seg",
     "rsunivlm_ccd",
+    "qwen_vl_vqa",
+    "qwen_vl_cap",
+    "qwen_vl_vg",
+    "qwen_vl_seg",
+    "qwen_vl_ccd",
     "fusion_classifier",
 }
+
+# Engine family -> tool_used prefix (CONTRACT.md §5 v1.2)
+FAMILY_PREFIX = {"rsunivlm": "rsunivlm_", "qwen": "qwen_vl_"}
 
 
 def assert_execution_meta(meta: dict, expected_tool: str = None):
@@ -54,25 +62,25 @@ def assert_confidence(conf: float):
     assert 0.0 <= conf <= 1.0, f"confidence must be between 0.0 and 1.0, got {conf}"
 
 
-def assert_vqa_result(res: dict):
+def assert_vqa_result(res: dict, family: str = "rsunivlm"):
     assert isinstance(res, dict)
     assert "answer" in res and isinstance(res["answer"], str) and len(res["answer"]) > 0
     assert "confidence" in res
     assert_confidence(res["confidence"])
     assert "meta" in res
-    assert_execution_meta(res["meta"], expected_tool="rsunivlm_vqa")
+    assert_execution_meta(res["meta"], expected_tool=FAMILY_PREFIX[family] + "vqa")
 
 
-def assert_captioning_result(res: dict):
+def assert_captioning_result(res: dict, family: str = "rsunivlm"):
     assert isinstance(res, dict)
     assert "caption" in res and isinstance(res["caption"], str) and len(res["caption"]) > 0
     assert "confidence" in res
     assert_confidence(res["confidence"])
     assert "meta" in res
-    assert_execution_meta(res["meta"], expected_tool="rsunivlm_cap")
+    assert_execution_meta(res["meta"], expected_tool=FAMILY_PREFIX[family] + "cap")
 
 
-def assert_detection_result(res: dict, expected_mode: str = None):
+def assert_detection_result(res: dict, expected_mode: str = None, family: str = "rsunivlm"):
     assert isinstance(res, dict)
     assert "mode" in res
     assert res["mode"] in ("bbox", "mask")
@@ -84,7 +92,7 @@ def assert_detection_result(res: dict, expected_mode: str = None):
     assert "meta" in res
 
     if res["mode"] == "bbox":
-        assert_execution_meta(res["meta"], expected_tool="rsunivlm_vg")
+        assert_execution_meta(res["meta"], expected_tool=FAMILY_PREFIX[family] + "vg")
         assert "boxes" in res
         assert isinstance(res["boxes"], list)
         assert len(res["boxes"]) > 0
@@ -93,20 +101,20 @@ def assert_detection_result(res: dict, expected_mode: str = None):
             assert len(box) == 4
             assert all(isinstance(c, int) for c in box)
     elif res["mode"] == "mask":
-        assert_execution_meta(res["meta"], expected_tool="rsunivlm_seg")
+        assert_execution_meta(res["meta"], expected_tool=FAMILY_PREFIX[family] + "seg")
         assert "mask_base64" in res
         assert res["mask_base64"] is not None
         assert "overlay_base64" in res
         assert res["overlay_base64"] is not None
 
 
-def assert_change_result(res: dict):
+def assert_change_result(res: dict, family: str = "rsunivlm"):
     assert isinstance(res, dict)
     assert "answer" in res and isinstance(res["answer"], str) and len(res["answer"]) > 0
     assert "confidence" in res
     assert_confidence(res["confidence"])
     assert "meta" in res
-    assert_execution_meta(res["meta"], expected_tool="rsunivlm_ccd")
+    assert_execution_meta(res["meta"], expected_tool=FAMILY_PREFIX[family] + "ccd")
 
 
 def assert_fusion_result(res: dict):
@@ -217,6 +225,8 @@ def _run_detection_target(target: str, image: Image.Image, query: str, mode: str
     if target == "mock":
         return rsunivlm_mock.run_detection(image, query, mode=mode)
     elif target == "wrapper":
+        # The real wrapper imports torch at module level; skip on CPU-only/CI envs.
+        pytest.importorskip("torch")
         from ai_service.rsunivlm.wrapper import run_detection as wrapper_run_detection
         with patch("ai_service.rsunivlm.wrapper._get_model", return_value=(MagicMock(), MagicMock(), MagicMock())):
             with patch("ai_service.rsunivlm.wrapper.run_raw_inference") as mock_infer:
@@ -226,44 +236,58 @@ def _run_detection_target(target: str, image: Image.Image, query: str, mode: str
                     else ("others *10, water *20, others *546", 100, 0.90)
                 )
                 return wrapper_run_detection(image, query, mode=mode)
+    elif target == "qwen_mock":
+        from ai_service.qwen_vl import mock as qwen_mock
+        return qwen_mock.run_detection(image, query, mode=mode)
+    elif target == "qwen_wrapper":
+        from ai_service.qwen_vl import wrapper as qwen_wrapper
+        with patch("ai_service.qwen_vl.wrapper.get_client", return_value=FakeVLClient()):
+            return qwen_wrapper.run_detection(image, query, mode=mode)
     raise ValueError(f"Unknown detection target: {target}")
 
 
-@pytest.mark.parametrize("target", ["mock", "wrapper"])
+DETECTION_TARGETS = ["mock", "wrapper", "qwen_mock", "qwen_wrapper"]
+
+
+def _family(target: str) -> str:
+    return "qwen" if target.startswith("qwen") else "rsunivlm"
+
+
+@pytest.mark.parametrize("target", DETECTION_TARGETS)
 def test_detection_auto_bbox(sample_image, target: str):
     # Where query -> auto routes to bbox
     result = _run_detection_target(target, sample_image, "Where is the aircraft?", mode="auto")
-    assert_detection_result(result, expected_mode="bbox")
+    assert_detection_result(result, expected_mode="bbox", family=_family(target))
     assert result["boxes"] is not None
     assert result["mask_base64"] is None
 
 
-@pytest.mark.parametrize("target", ["mock", "wrapper"])
+@pytest.mark.parametrize("target", DETECTION_TARGETS)
 def test_detection_auto_mask(sample_image, target: str):
     # Highlight query -> auto routes to mask
     result = _run_detection_target(target, sample_image, "Highlight the water bodies in this image", mode="auto")
-    assert_detection_result(result, expected_mode="mask")
+    assert_detection_result(result, expected_mode="mask", family=_family(target))
     assert result["boxes"] is None
     assert result["mask_base64"] is not None
     assert result["overlay_base64"] is not None
 
 
-@pytest.mark.parametrize("target", ["mock", "wrapper"])
+@pytest.mark.parametrize("target", DETECTION_TARGETS)
 def test_detection_auto_where_beats_subject_keyword(sample_image, target: str):
     # Precedence: 'Where is the water body?' has 'where' which must beat 'water'
     result = _run_detection_target(target, sample_image, "Where is the water body?", mode="auto")
-    assert_detection_result(result, expected_mode="bbox")
+    assert_detection_result(result, expected_mode="bbox", family=_family(target))
     assert result["boxes"] is not None
     assert result["mask_base64"] is None
 
 
-@pytest.mark.parametrize("target", ["mock", "wrapper"])
+@pytest.mark.parametrize("target", DETECTION_TARGETS)
 def test_detection_explicit_modes(sample_image, target: str):
     bbox_res = _run_detection_target(target, sample_image, "arbitrary query", mode="bbox")
-    assert_detection_result(bbox_res, expected_mode="bbox")
+    assert_detection_result(bbox_res, expected_mode="bbox", family=_family(target))
 
     mask_res = _run_detection_target(target, sample_image, "arbitrary query", mode="mask")
-    assert_detection_result(mask_res, expected_mode="mask")
+    assert_detection_result(mask_res, expected_mode="mask", family=_family(target))
 
 
 def test_mock_change_detection(sample_image):
@@ -327,3 +351,90 @@ def test_real_fusion_invalid_modality(sample_image):
     with pytest.raises(AIServiceError) as exc_info:
         real_run_fusion(img1, img2, "Identify built-up areas")
     assert exc_info.value.code == INVALID_MODALITY_COMBINATION
+
+
+# ── Qwen-VL engine (AI_SERVICE_CONTRACT.md v1.2) ──────────────────────
+# The real wrapper is exercised against a fake VLM server client so CI needs no GPU.
+import json as _json
+
+from ai_service.qwen_vl.client import ChatResult as _ChatResult
+
+
+class FakeVLClient:
+    model = "fake-qwen"
+
+    def __init__(self, token_confidence=0.91):
+        self.token_confidence = token_confidence
+        self.calls = []
+
+    def chat(self, prompt, images=(), system=None, json_schema=None, max_tokens=512, temperature=0.1):
+        self.calls.append({"prompt": prompt, "n_images": len(images), "schema": json_schema})
+        if json_schema and "objects" in json_schema.get("properties", {}):
+            text = _json.dumps({"objects": [{"label": "aircraft", "bbox_2d": [100, 200, 300, 400]}]})
+        elif json_schema and "task" in json_schema.get("properties", {}):
+            text = _json.dumps({"task": "captioning"})
+        else:
+            text = "A coastal town with a harbour and agricultural fields."
+        return _ChatResult(text=text, latency_ms=42, token_confidence=self.token_confidence)
+
+    def chat_json(self, prompt, schema, **kwargs):
+        res = self.chat(prompt, json_schema=schema, **kwargs)
+        return _json.loads(res.text), res
+
+
+@pytest.fixture
+def fake_vl():
+    client = FakeVLClient()
+    with patch("ai_service.qwen_vl.wrapper.get_client", return_value=client):
+        yield client
+
+
+@pytest.mark.parametrize("impl", ["qwen_mock", "qwen_wrapper"])
+def test_qwen_vqa_captioning_change(sample_image, impl, request):
+    if impl == "qwen_mock":
+        from ai_service.qwen_vl import mock as m
+    else:
+        request.getfixturevalue("fake_vl")
+        from ai_service.qwen_vl import wrapper as m
+    assert_vqa_result(m.run_vqa(sample_image, "How many ships?"), family="qwen")
+    assert_captioning_result(m.run_captioning(sample_image), family="qwen")
+    after = Image.new("RGB", (256, 256), color=(200, 30, 30))
+    assert_change_result(m.run_change_detection(sample_image, after, "What changed?"), family="qwen")
+
+
+def test_qwen_wrapper_box_scaling(sample_image, fake_vl):
+    """bbox_2d is a 0-1000 frame → [100,200,300,400] on 256px = [26,51,77,102]."""
+    from ai_service.qwen_vl import wrapper as m
+    res = m.run_detection(sample_image, "Where is the aircraft?")
+    assert res["boxes"] == [[26, 51, 77, 102]]
+    assert res["meta"]["parameters"]["detected_labels"] == ["aircraft"]
+
+
+def test_qwen_wrapper_confidence_source(sample_image):
+    from ai_service.qwen_vl import wrapper as m
+    with patch("ai_service.qwen_vl.wrapper.get_client", return_value=FakeVLClient(token_confidence=0.93)):
+        r = m.run_vqa(sample_image, "q")
+        assert r["confidence"] == 0.93 and r["meta"]["parameters"]["confidence_source"] == "model_softmax"
+    with patch("ai_service.qwen_vl.wrapper.get_client", return_value=FakeVLClient(token_confidence=None)):
+        r = m.run_vqa(sample_image, "q")
+        assert r["meta"]["parameters"]["confidence_source"] == "heuristic"
+
+
+def test_qwen_wrapper_water_mask_uses_spectral(sample_image, fake_vl):
+    from ai_service.qwen_vl import wrapper as m
+    res = m.run_detection(sample_image, "Highlight the water bodies")
+    assert res["mode"] == "mask"
+    assert res["meta"]["parameters"]["mask_source"] == "spectral_index"
+    assert fake_vl.calls == []  # no VLM call needed for spectral water masks
+
+
+def test_qwen_classify_intent(fake_vl):
+    from ai_service.qwen_vl import wrapper as m
+    assert m.classify_intent("Give me an overview", ["optical"]) == "captioning"
+
+
+def test_qwen_wrapper_invalid_image():
+    from ai_service.qwen_vl import wrapper as m
+    with pytest.raises(AIServiceError) as exc:
+        m.run_vqa("not an image", "q")
+    assert exc.value.code == MODEL_INFERENCE_FAILED

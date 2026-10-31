@@ -69,3 +69,8 @@ pnpm-debug.log*
 .idea/
 .DS_Store
 Thumbs.db
+
+# Local llama.cpp binaries and GGUF weights (downloaded, not versioned)
+tools/
+# Engine evaluation reports are generated locally
+reports/

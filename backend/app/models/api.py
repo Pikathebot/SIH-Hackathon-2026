@@ -97,3 +97,5 @@ class HealthResponse(BaseModel):
     status: str = "ok"
     rsunivlm_loaded: bool
     fusion_loaded: bool
+    # Additive (API_CONTRACT v1.2): active engine + model-server reachability
+    engine: Optional[dict] = None

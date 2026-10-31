@@ -56,41 +56,23 @@ _run_detection = None
 _run_change_detection = None
 _run_fusion = None
 
-# Try importing the contracted AI service modules first
-try:
-    if AI_SERVICE_MODE == "real":
-        from ai_service.rsunivlm.wrapper import (
-            run_captioning as _ext_cap,
-            run_change_detection as _ext_cd,
-            run_detection as _ext_det,
-            run_vqa as _ext_vqa,
-        )
-    else:
-        from ai_service.rsunivlm.mock import (
-            run_captioning as _ext_cap,
-            run_change_detection as _ext_cd,
-            run_detection as _ext_det,
-            run_vqa as _ext_vqa,
-        )
-    _run_vqa = _ext_vqa
-    _run_captioning = _ext_cap
-    _run_detection = _ext_det
-    _run_change_detection = _ext_cd
-    _rsunivlm_loaded = True
-    logger.info("RSUniVLM module loaded (mode=%s)", AI_SERVICE_MODE)
-except (ImportError, AttributeError) as exc:
-    logger.warning("RSUniVLM import failed (%s), using fallback stubs", exc)
+# Resolve the configured engine (AI_ENGINE x AI_SERVICE_MODE) — see app/engines.py
+from app.config import AI_ENGINE, LLM_INTENT_ENABLED
+from app.engines import Engine, build_engine
 
+ENGINE: Optional[Engine] = None
 try:
-    if AI_SERVICE_MODE == "real":
-        from ai_service.fusion.wrapper import run_fusion as _ext_fusion
-    else:
-        from ai_service.fusion.mock import run_fusion as _ext_fusion
-    _run_fusion = _ext_fusion
+    ENGINE = build_engine(AI_ENGINE, AI_SERVICE_MODE)
+    _run_vqa = ENGINE.run_vqa
+    _run_captioning = ENGINE.run_captioning
+    _run_detection = ENGINE.run_detection
+    _run_change_detection = ENGINE.run_change_detection
+    _run_fusion = ENGINE.run_fusion
+    _rsunivlm_loaded = True
     _fusion_loaded = True
-    logger.info("Fusion module loaded (mode=%s)", AI_SERVICE_MODE)
+    logger.info("AI engine loaded: engine=%s mode=%s", ENGINE.name, ENGINE.mode)
 except (ImportError, AttributeError) as exc:
-    logger.warning("Fusion import failed (%s), using fallback stubs", exc)
+    logger.warning("AI engine import failed (%s), using fallback stubs", exc)
 
 # Fall back to internal stubs if external modules aren't available
 if not _rsunivlm_loaded:
@@ -241,6 +223,34 @@ def classify_intent(request: QueryRequest) -> str:
     return "vqa"
 
 
+_SINGLE_IMAGE_TASKS = ("vqa", "captioning", "detection")
+
+
+async def _maybe_llm_intent(request: QueryRequest, keyword_task: str) -> str:
+    """Refine single-image intent with the engine's LLM classifier if enabled."""
+    if (
+        ENGINE is None
+        or ENGINE.classify_intent is None
+        or ENGINE.mode != "real"
+        or not LLM_INTENT_ENABLED
+        or len(request.images) != 1
+    ):
+        return keyword_task
+    modalities = [img.modality for img in request.images]
+    try:
+        llm_task = await asyncio.wait_for(
+            asyncio.to_thread(ENGINE.classify_intent, request.query, modalities), timeout=20
+        )
+    except Exception as exc:  # timeout / server down → keep keyword result
+        logger.warning("LLM intent classification failed (%s); using keyword task=%s", exc, keyword_task)
+        return keyword_task
+    if llm_task in _SINGLE_IMAGE_TASKS:
+        if llm_task != keyword_task:
+            logger.info("LLM intent override: keyword=%s → llm=%s", keyword_task, llm_task)
+        return llm_task
+    return keyword_task
+
+
 # ---------------------------------------------------------------------------
 # Image decoding — base64/URL/Asset → PIL.Image at the API boundary
 # AI modules work with PIL.Image.Image objects, never raw base64.
@@ -259,7 +269,8 @@ def _decode_image(url_or_base64: str) -> Tuple[Image.Image, Optional[GeoMetadata
         asset_id = data.split("assets/")[-1].strip()
 
     if asset_id:
-        upload_dirs = [Path("backend/data/uploads"), Path("data/uploads")]
+        from app.config import UPLOADS_DIR
+        upload_dirs = [UPLOADS_DIR]
         matched_file = None
         for u_dir in upload_dirs:
             matches = list(u_dir.glob(f"{asset_id}.*"))
@@ -356,7 +367,7 @@ def _dispatch_ai_sync(
     elif task == "detection":
         primary_img = decoded_images[0]
         # Check if query is bounding box (VG) or segmentation (SEG)
-        from ai_service.rsunivlm.inference import resolve_detection_mode
+        from ai_service.rsunivlm.parsing import resolve_detection_mode
         resolved_mode = resolve_detection_mode(request.query)
 
         file_src = getattr(primary_img, "_file_source", None)
@@ -609,8 +620,10 @@ async def process_query(request: QueryRequest) -> QueryResponse:
     # 1. Validate inputs
     validate_inputs(request)
 
-    # 2. Classify intent
+    # 2. Classify intent — keyword rules first, then (optionally) the VLM for
+    #    single-image queries; any LLM failure keeps the keyword result.
     task = classify_intent(request)
+    task = await _maybe_llm_intent(request, task)
 
     # 3. Decode images (sync — fast operation)
     decoded_pairs = [_decode_image(img.url_or_base64) for img in request.images]
