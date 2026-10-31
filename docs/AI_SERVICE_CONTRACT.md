@@ -1,8 +1,8 @@
 # AI_SERVICE_CONTRACT.md — Orchestrator ↔ AI Modules Contract
 
-**Version:** 1.0.0
+**Version:** 1.1.0
 **Consumer:** `backend/` orchestrator (Person 3)
-**Producers:** `ai_service/rsunivlm/` (Person 1), `ai_service/fusion/` (Person 2)
+**Producers:** `ai_service/rsunivlm/` (Person 1), `ai_service/fusion/` (Person 2), `ai_service/qwen_vl/` (v1.1.0)
 
 These are **Python function contracts**, called in-process (see `ARCHITECTURE.md` §3 for why). Person 1 and Person 2 may implement whatever is behind these functions however they want — model choice, prompt engineering, caching, batching — as long as the signature, return shape, and error behavior below are honored exactly. Person 3 codes against this contract and must never need to read Person 1/2's internals to call these correctly.
 
@@ -90,6 +90,23 @@ def run_change_detection(image_before: Image.Image, image_after: Image.Image, qu
 **Error behavior:** on model failure (OOM, malformed image, checkpoint not loaded), raise `AIServiceError(code="MODEL_INFERENCE_FAILED", message=...)` (defined in `ai_service/common/errors.py`) — do not return a result dict with a fabricated low-confidence answer. The orchestrator catches this and maps it to the `MODEL_INFERENCE_FAILED` API error code.
 
 ---
+
+## 2b. Function contracts — Qwen-VL engine (v1.1.0, additive)
+
+Module path: `ai_service/qwen_vl/wrapper.py` (real, served by an OpenAI-compatible server, by default llama.cpp `llama-server` with Qwen3-VL-8B GGUF) and `ai_service/qwen_vl/mock.py`.
+
+- It exposes the **same four functions and return TypedDicts** as §2 (`run_vqa`, `run_captioning`, `run_detection`, `run_change_detection`) and emits the `qwen_vl_*` `tool_used` values (CONTRACT.md §5).
+- `run_detection` uses the same `resolve_detection_mode` routing as §2.
+  - **bbox**: the VLM returns `bbox_2d` coordinates normalised to 0-1000, which are converted to pixel `[x1, y1, x2, y2]` integers.
+  - **mask**: the VLM cannot produce pixel masks, so it uses one of two sources and records which in `meta.parameters.mask_source`:
+    - `"spectral_index"` for water, land and coastline queries;
+    - `"bbox_rasterized"` otherwise (grounded boxes filled into a mask).
+- `run_change_detection` sets `meta.parameters.mask_source = "pixel_difference"`.
+- **Confidence**: the mean token probability from the server's logprobs is reported as `confidence_source: "model_softmax"`. When logprobs are unavailable, the documented fixed values are labelled `"heuristic"`.
+- An extra function `classify_intent(query: str, modalities: list[str]) -> Optional[str]` returns a canonical `task` or `None`. The orchestrator uses it only for single-image queries, and only as a refinement of the keyword classifier.
+- Errors: a server that is unreachable, times out or returns malformed output raises `AIServiceError(MODEL_INFERENCE_FAILED)`.
+
+The orchestrator selects the implementation with `AI_ENGINE` (`rsunivlm` | `qwen` | `hybrid`) × `AI_SERVICE_MODE` (`mock` | `real`); see `backend/app/engines.py`. `hybrid` routes mask-mode detection to RSUniVLM §2 and everything else to Qwen-VL.
 
 ## 3. Function contract — Fusion module (Person 2)
 

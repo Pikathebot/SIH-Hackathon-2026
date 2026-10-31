@@ -1,6 +1,6 @@
 # API_CONTRACT.md — Frontend ↔ Backend HTTP Contract
 
-**Version:** 1.1.0
+**Version:** 1.2.0
 **Base URL (local dev):** `http://localhost:8000`
 **Consumers:** `frontend/` (Person 4)
 **Producers:** `backend/` (Person 3)
@@ -107,6 +107,8 @@ Trivial liveness check for local dev / demo rehearsal, no auth.
 ```json
 { "status": "ok", "rsunivlm_loaded": true, "fusion_loaded": true }
 ```
+
+*(v1.2.0, additive)* The response also includes an optional `engine` object, for example `{"engine": "hybrid", "mode": "real", "notes": [], "vlm_server": "http://127.0.0.1:8080", "vlm_model": "qwen3-vl-8b", "vlm_available": true}`. The `vlm_*` keys are present only for the `qwen` and `hybrid` engines in real mode.
 
 ---
 

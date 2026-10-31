@@ -1,6 +1,6 @@
 # CONTRACT.md — SatQuery AI Single Source of Truth
 
-**Status:** LOCKED for sprint (v1.0.0) — see "How to change this contract" before editing anything.
+**Status:** v1.1.0 (additive: Qwen-VL engine `tool_used` values) — productization phase — see "How to change this contract" before editing anything.
 **Applies to:** all humans and AI coding agents (Codex, Claude, Antigravity, etc.) working on any module of SatQuery AI.
 
 This document is the root of the contract set. If any other doc, any code comment, or any agent's assumption disagrees with these files, **these files win.** Code is wrong until the contract is updated; the contract is never silently overridden by code.
@@ -62,7 +62,9 @@ Without a written contract, each of these will independently invent endpoint nam
 `vqa` | `captioning` | `detection` | `change_detection` | `fusion`
 
 ### `tool_used` (which underlying model/mode actually ran)
-`rsunivlm_vqa` | `rsunivlm_cap` | `rsunivlm_vg` | `rsunivlm_seg` | `rsunivlm_ccd` | `fusion_classifier`
+`rsunivlm_vqa` | `rsunivlm_cap` | `rsunivlm_vg` | `rsunivlm_seg` | `rsunivlm_ccd` | `qwen_vl_vqa` | `qwen_vl_cap` | `qwen_vl_vg` | `qwen_vl_seg` | `qwen_vl_ccd` | `fusion_classifier`
+
+*(v1.1.0)* The `qwen_vl_*` values are emitted by the Qwen-VL engine (`ai_service/qwen_vl/`, selected with `AI_ENGINE=qwen|hybrid`). Each mirrors the RSUniVLM value with the same suffix: `vqa`, `cap`, `vg`, `seg`, `ccd`.
 
 ### `modality` (image field)
 `optical` | `sar`
