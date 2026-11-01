@@ -1,6 +1,6 @@
 # API_CONTRACT.md — Frontend ↔ Backend HTTP Contract
 
-**Version:** 2.0.0 (breaking: `/query`, `/upload`, `/assets` and `/preview` now require authentication; see §5)
+**Version:** 2.1.0 (2.1.0 adds `GET /assets/{asset_id}/preview`; 2.0.0 made `/query`, `/upload`, `/assets` and `/preview` require authentication; see §5)
 **Base URL (local dev):** `http://localhost:8000`
 **Consumers:** `frontend/` (Person 4)
 **Producers:** `backend/` (Person 3)
@@ -250,5 +250,7 @@ Every endpoint requires `Authorization: Bearer <access_token>`, except `GET /hea
 ```
 
 `GET /assets/{asset_id}` returns the original file. Only the owner can fetch it; anyone else gets `404`.
+
+`GET /assets/{asset_id}/preview` *(v2.1.0)* returns a browser-renderable `image/png` preview of the asset, at most 1024 px on its longest side, with the same radiometric normalisation as `/upload`. Only the owner can fetch it; anyone else gets `404`. The frontend uses it to show images from history, including GeoTIFF and JPEG 2000 uploads that browsers cannot display.
 
 `POST /preview` keeps the same body and response. It now requires authentication and follows the same URL rules as `/query`.
