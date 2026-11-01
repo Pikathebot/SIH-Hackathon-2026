@@ -17,6 +17,8 @@ fixed fall-back values below are labelled `"heuristic"`.
 
 from __future__ import annotations
 
+import json
+import re
 from typing import Literal, Optional
 
 import cv2
@@ -45,24 +47,6 @@ SYSTEM_PROMPT = (
     "return, dark = smooth surfaces such as calm water). Answer precisely and concisely, "
     "ground every claim in visible evidence, and say so when something cannot be determined."
 )
-
-_BOX_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "objects": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "label": {"type": "string"},
-                    "bbox_2d": {"type": "array", "items": {"type": "number"}, "minItems": 4, "maxItems": 4},
-                },
-                "required": ["label", "bbox_2d"],
-            },
-        }
-    },
-    "required": ["objects"],
-}
 
 _LAND = ("landmass", "land mass", "land", "terrain", "ground")
 _COAST = ("coast", "coastline", "coastal", "shore", "shoreline", "waterline", "land-water")
@@ -144,16 +128,42 @@ def _norm1000_to_pixels(bbox: list, size: tuple[int, int]) -> Optional[list[int]
     return px
 
 
+_BOX_OBJ_RE = re.compile(r"\{[^{}]*\"bbox_2d\"[^{}]*\}")
+
+
+def _parse_native_boxes(text: str) -> list[dict]:
+    """Extract Qwen3-VL native grounding objects from free-form output.
+
+    Tolerates code fences, surrounding prose and a list truncated by max_tokens
+    (each complete `{... "bbox_2d": [...] ...}` object is parsed on its own).
+    """
+    objs = []
+    for m in _BOX_OBJ_RE.finditer(text or ""):
+        try:
+            o = json.loads(m.group(0))
+        except json.JSONDecodeError:
+            continue
+        if isinstance(o, dict):
+            objs.append(o)
+    return objs
+
+
 def ground_boxes(image: Image.Image, query: str) -> tuple[list[list[int]], list[str], ChatResult]:
+    # Qwen3-VL's trained grounding format is a bare JSON list of
+    # {"bbox_2d": [...], "label": ...}. Measured on sample_data (2026-11-01): wrapping it in
+    # {"objects": [...]}, forcing a strict JSON grammar and adding the cautious analyst
+    # system prompt made the model return [] even for clearly visible ships, so grounding
+    # runs unconstrained, without the system prompt, and is parsed leniently.
+    # Phrasing follows the Qwen3-VL grounding cookbook; offering an explicit "[] if none"
+    # escape made empty answers more likely in testing.
     prompt = (
-        f"Task: {query.strip()}\n"
-        "Locate every instance in the image that the task refers to. Return JSON "
-        '{"objects": [{"label": str, "bbox_2d": [x1, y1, x2, y2]}]} with coordinates normalised '
-        "to 0-1000. Return an empty list if nothing matches."
+        f"{query.strip()}\n"
+        "Locate every object in the image that this refers to and output its bbox coordinates "
+        'using JSON format, as a list of {"bbox_2d": [x1, y1, x2, y2], "label": str}.'
     )
-    data, res = get_client().chat_json(prompt, _BOX_SCHEMA, images=[image], system=SYSTEM_PROMPT, max_tokens=1024)
+    res = get_client().chat(prompt, images=[image], max_tokens=1024)
     boxes, labels = [], []
-    for obj in (data or {}).get("objects", []) if isinstance(data, dict) else []:
+    for obj in _parse_native_boxes(res.text):
         px = _norm1000_to_pixels(obj.get("bbox_2d"), image.size)
         if px is not None:
             boxes.append(px)

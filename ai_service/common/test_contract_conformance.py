@@ -369,8 +369,9 @@ class FakeVLClient:
 
     def chat(self, prompt, images=(), system=None, json_schema=None, max_tokens=512, temperature=0.1):
         self.calls.append({"prompt": prompt, "n_images": len(images), "schema": json_schema})
-        if json_schema and "objects" in json_schema.get("properties", {}):
-            text = _json.dumps({"objects": [{"label": "aircraft", "bbox_2d": [100, 200, 300, 400]}]})
+        if json_schema is None and "bbox_2d" in prompt:
+            # Qwen3-VL native grounding output: fenced bare list
+            text = '```json\n[\n\t{"bbox_2d": [100, 200, 300, 400], "label": "aircraft"}\n]\n```'
         elif json_schema and "task" in json_schema.get("properties", {}):
             text = _json.dumps({"task": "captioning"})
         else:
