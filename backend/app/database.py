@@ -1,32 +1,90 @@
 """
-Database module — SQLite via aiosqlite.
+Database: SQLAlchemy 2 (async) + Alembic, per DATABASE_CONTRACT.md v1.1.0 §5.
 
-Schema matches DATABASE_CONTRACT.md v1.0.0 exactly.
-Uses create_all() approach per DATABASE_CONTRACT.md §4 (no Alembic for sprint).
+- `engine` / `SessionLocal` come from `settings.resolved_database_url`
+  (SQLite by default; Postgres by changing DATABASE_URL only).
+- `get_session` is the FastAPI dependency for a request-scoped AsyncSession.
+- `init_db()` runs on startup: it brings any database to `alembic upgrade head`,
+  adopting pre-Alembic databases in place (stamp 0001) instead of recreating them.
 """
 
+from __future__ import annotations
+
+import asyncio
+import logging
 import shutil
 from pathlib import Path
+from typing import AsyncIterator
 
-import aiosqlite
+from alembic import command
+from alembic.config import Config
+from sqlalchemy import event, inspect, text
+from sqlalchemy.engine import Connection
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 
-from app.config import DATABASE_PATH
+from app.config import settings
+
+logger = logging.getLogger(__name__)
+
+BACKEND_DIR = Path(__file__).resolve().parent.parent
+
+_is_sqlite = settings.resolved_database_url.startswith("sqlite")
+# SQLite: no pool (connections are cheap and never shared across event loops, e.g. in
+# tests or alembic's own loop). Postgres: the default pool.
+engine = create_async_engine(settings.resolved_database_url,
+                             **({"poolclass": NullPool} if _is_sqlite else {"pool_pre_ping": True}))
+SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
+
+if engine.dialect.name == "sqlite":
+    @event.listens_for(engine.sync_engine, "connect")
+    def _sqlite_pragmas(dbapi_conn, _record):  # pragma: no cover - trivial
+        cur = dbapi_conn.cursor()
+        cur.execute("PRAGMA foreign_keys=ON")
+        cur.close()
+
+
+async def get_session() -> AsyncIterator[AsyncSession]:
+    async with SessionLocal() as session:
+        yield session
+
+
+def alembic_config(url: str | None = None) -> Config:
+    cfg = Config(str(BACKEND_DIR / "alembic.ini"))
+    cfg.set_main_option("script_location", str(BACKEND_DIR / "alembic"))
+    cfg.set_main_option("sqlalchemy.url", url or settings.resolved_database_url)
+    return cfg
 
 
 # ---------------------------------------------------------------------------
-# Schema DDL — matches DATABASE_CONTRACT.md §1 exactly
+# Adopting pre-Alembic databases
 # ---------------------------------------------------------------------------
-_SCHEMA_SQL = """
-CREATE TABLE IF NOT EXISTS images (
-    id              TEXT PRIMARY KEY,
-    modality        TEXT NOT NULL CHECK(modality IN ('optical', 'sar')),
-    capture_date    TEXT,
-    storage_path    TEXT NOT NULL,
-    checksum        TEXT NOT NULL,
-    created_at      TEXT NOT NULL
-);
+_QUERIES_COLUMNS = (
+    "id, query_text, image_ids, selected_task, tool_used, parameters, answer, confidence, "
+    "visual_evidence_type, visual_evidence_ref, latency_ms, inputs_validated, status, "
+    "error_code, created_at"
+)
 
-CREATE TABLE IF NOT EXISTS queries (
+
+def _sqlite_db_path(url: str) -> Path | None:
+    prefix = "sqlite+aiosqlite:///"
+    return Path(url[len(prefix):]) if url.startswith(prefix) else None
+
+
+def _inspect_legacy(conn: Connection) -> tuple[bool, bool, str | None]:
+    insp = inspect(conn)
+    tables = set(insp.get_table_names())
+    queries_sql = None
+    if "queries" in tables and conn.dialect.name == "sqlite":
+        queries_sql = conn.execute(
+            text("SELECT sql FROM sqlite_master WHERE type='table' AND name='queries'")
+        ).scalar()
+    return "queries" in tables, "alembic_version" in tables, queries_sql
+
+
+# The 0001 `queries` table, as SQLite DDL (this path only ever runs on SQLite).
+_QUERIES_0001_DDL = """
+CREATE TABLE queries (
     id                      TEXT PRIMARY KEY,
     query_text              TEXT NOT NULL,
     image_ids               TEXT NOT NULL,
@@ -42,61 +100,43 @@ CREATE TABLE IF NOT EXISTS queries (
     status                  TEXT NOT NULL CHECK(status IN ('success', 'error')),
     error_code              TEXT,
     created_at              TEXT NOT NULL
-);
+)
 """
 
 
-_QUERIES_COLUMNS = (
-    "id, query_text, image_ids, selected_task, tool_used, parameters, answer, confidence, "
-    "visual_evidence_type, visual_evidence_ref, latency_ms, inputs_validated, status, "
-    "error_code, created_at"
-)
+def _rebuild_queries_v110(conn: Connection) -> None:
+    """Pre-v1.1.0 SQLite `queries` rejects qwen_vl_* values and SQLite cannot alter a CHECK.
 
-
-async def _upgrade_queries_tool_used_check(db: aiosqlite.Connection, db_path: Path) -> None:
-    """Rebuild `queries` if it predates the DATABASE_CONTRACT v1.1.0 `qwen_vl_*` tool_used values.
-
-    `CREATE TABLE IF NOT EXISTS` never alters an existing table and SQLite cannot change a
-    CHECK constraint in place, so databases created before v1.1.0 reject every Qwen-engine
-    row. Rows are copied across unchanged; the file is backed up once beforehand. Stopgap
-    until Alembic migrations land.
+    Rebuild the table from the 0001 definition, copying every row unchanged.
     """
-    async with db.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='queries'") as cur:
-        row = await cur.fetchone()
-    if not row or "qwen_vl_vqa" in row[0]:
-        return
-    backup = db_path.with_name(db_path.name + ".bak-pre-v1.1.0")
-    if not backup.exists():
-        shutil.copy2(db_path, backup)
-    await db.execute("ALTER TABLE queries RENAME TO queries_pre_v110")
-    await db.executescript(_SCHEMA_SQL)
-    await db.execute(
-        f"INSERT INTO queries ({_QUERIES_COLUMNS}) SELECT {_QUERIES_COLUMNS} FROM queries_pre_v110"
-    )
-    await db.execute("DROP TABLE queries_pre_v110")
+    conn.execute(text("ALTER TABLE queries RENAME TO queries_pre_v110"))
+    conn.execute(text(_QUERIES_0001_DDL))
+    conn.execute(text(f"INSERT INTO queries ({_QUERIES_COLUMNS}) SELECT {_QUERIES_COLUMNS} FROM queries_pre_v110"))
+    conn.execute(text("DROP TABLE queries_pre_v110"))
+
+
+async def _adopt_legacy_database() -> None:
+    async with engine.begin() as conn:
+        has_queries, has_version, queries_sql = await conn.run_sync(_inspect_legacy)
+        if not has_queries or has_version:
+            return
+        if queries_sql is not None and "qwen_vl_vqa" not in queries_sql:
+            db_path = _sqlite_db_path(settings.resolved_database_url)
+            if db_path and db_path.exists():
+                backup = db_path.with_name(db_path.name + ".bak-pre-v1.1.0")
+                if not backup.exists():
+                    shutil.copy2(db_path, backup)
+            await conn.run_sync(_rebuild_queries_v110)
+            logger.info("Rebuilt legacy queries table with the v1.1.0 tool_used CHECK")
+    await asyncio.to_thread(command.stamp, alembic_config(), "0001")
+    logger.info("Adopted pre-Alembic database at revision 0001")
 
 
 async def init_db() -> None:
-    """Create tables if they don't exist (and upgrade stale ones). Safe to call on every startup."""
-    db_path = Path(DATABASE_PATH)
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    async with aiosqlite.connect(str(db_path)) as db:
-        await db.executescript(_SCHEMA_SQL)
-        await _upgrade_queries_tool_used_check(db, db_path)
-        await db.commit()
-
-
-async def get_db() -> aiosqlite.Connection:
-    """
-    Open and return an aiosqlite connection.
-
-    Caller is responsible for closing the connection when done:
-        db = await get_db()
-        try:
-            ...
-        finally:
-            await db.close()
-    """
-    db = await aiosqlite.connect(DATABASE_PATH)
-    db.row_factory = aiosqlite.Row
-    return db
+    """Bring the database to the latest schema. Safe to call on every startup."""
+    db_path = _sqlite_db_path(settings.resolved_database_url)
+    if db_path:
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+    await _adopt_legacy_database()
+    # Alembic's async env.py calls asyncio.run(), so run it outside this event loop.
+    await asyncio.to_thread(command.upgrade, alembic_config(), "head")

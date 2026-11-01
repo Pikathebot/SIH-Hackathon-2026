@@ -17,11 +17,13 @@ if _project_root not in sys.path:
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 
+from app.config import settings
 from app.database import init_db
-from app.models.api import ErrorDetail, ErrorResponse
-from app.routers import health_router, query_router, preview_router, upload_router
+from app.errors import error_response, install_error_handlers
+from app.routers import (
+    auth_router, health_router, preview_router, query_router, sessions_router, upload_router,
+)
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -43,12 +45,13 @@ async def lifespan(app: FastAPI):
     logger.info("Starting SatQuery AI backend...")
 
     # Ensure data directories exist
-    from app.config import IMAGES_DIR, UPLOADS_DIR
-    IMAGES_DIR.mkdir(parents=True, exist_ok=True)
-    UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+    from app.config import EVIDENCE_DIR, IMAGES_DIR, UPLOADS_DIR
+    for d in (IMAGES_DIR, UPLOADS_DIR, EVIDENCE_DIR):
+        d.mkdir(parents=True, exist_ok=True)
 
-    # Initialize database
+    # Bring the database to the latest Alembic revision (adopts legacy DBs in place)
     await init_db()
+    settings.jwt_secret  # resolve (or generate) the signing key at startup, not on first login
     logger.info("Database initialized")
 
     # Add project root to sys.path so ai_service imports work
@@ -66,20 +69,18 @@ async def lifespan(app: FastAPI):
 # ---------------------------------------------------------------------------
 app = FastAPI(
     title="SatQuery AI",
-    description="Satellite image analysis API powered by RSUniVLM",
-    version="1.0.0",
+    description="Satellite image analysis API (Qwen3-VL + RSUniVLM hybrid engine)",
+    version="2.0.0",
     lifespan=lifespan,
 )
 
 # ---------------------------------------------------------------------------
-# CORS — allow frontend dev server per API_CONTRACT.md §4
+# CORS — explicit origins from CORS_ORIGINS, never "*" (API_CONTRACT.md §4)
 # ---------------------------------------------------------------------------
+install_error_handlers(app)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-    ],
+    allow_origins=settings.cors_origin_list,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -89,6 +90,8 @@ app.add_middleware(
 # Include routers
 # ---------------------------------------------------------------------------
 app.include_router(health_router)
+app.include_router(auth_router)
+app.include_router(sessions_router)
 app.include_router(query_router)
 app.include_router(preview_router)
 app.include_router(upload_router)
@@ -110,19 +113,10 @@ async def root():
 # produce a bare 500 with no JSON body")
 # ---------------------------------------------------------------------------
 @app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+async def global_exception_handler(request: Request, exc: Exception):
     """Catch-all for any unhandled exception."""
     logger.exception("Unhandled exception: %s", exc)
-    return JSONResponse(
-        status_code=500,
-        content=ErrorResponse(
-            error=ErrorDetail(
-                code="INTERNAL_ERROR",
-                message="An unexpected internal error occurred.",
-                detail=str(exc),
-            )
-        ).model_dump(),
-    )
+    return error_response(500, "INTERNAL_ERROR", "An unexpected internal error occurred.", detail=str(exc))
 
 
 # ---------------------------------------------------------------------------

@@ -10,4 +10,4 @@ from app.models.api import (  # noqa: F401
     ErrorResponse,
     HealthResponse,
 )
-from app.models.db import ImageRow, QueryRow  # noqa: F401
+from app.models.db import AnalysisSession, ImageRecord, QueryRecord, RefreshToken, User  # noqa: F401

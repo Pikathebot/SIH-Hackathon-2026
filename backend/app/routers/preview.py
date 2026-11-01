@@ -6,6 +6,7 @@ PNG data URL (with robust 2%-98% radiometric normalization for GeoTIFFs)
 and extracted geospatial coordinate bounds.
 """
 
+import asyncio
 import base64
 import io
 import logging
@@ -18,6 +19,7 @@ from PIL import Image
 from app.geotiff import is_geotiff, process_geotiff
 from app.models.api import ErrorDetail, ErrorResponse, GeospatialMetadata
 from app.orchestrator import _decode_image, QueryValidationError
+from app.security import CurrentUser
 
 logger = logging.getLogger(__name__)
 
@@ -44,13 +46,13 @@ class PreviewResponse(BaseModel):
         500: {"model": ErrorResponse},
     },
 )
-async def generate_preview(request: PreviewRequest):
+async def generate_preview(request: PreviewRequest, user: CurrentUser):
     """
     POST /api/v1/preview — generate a web-friendly PNG preview for any image/GeoTIFF.
     """
     try:
         data = request.url_or_base64.strip()
-        pil_img, geo_meta = _decode_image(data)
+        pil_img, geo_meta = await asyncio.to_thread(_decode_image, data)
 
         # Convert PIL Image to PNG base64 data URI
         buf = io.BytesIO()

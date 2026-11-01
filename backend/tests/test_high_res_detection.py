@@ -6,11 +6,9 @@ import io
 import numpy as np
 from PIL import Image
 import pytest
-from fastapi.testclient import TestClient
 import rasterio
 import rasterio.transform
 
-from app.main import app
 
 
 def _create_large_geotiff_bytes(width: int = 2400, height: int = 1800) -> bytes:
@@ -33,10 +31,10 @@ def _create_large_geotiff_bytes(width: int = 2400, height: int = 1800) -> bytes:
     return buf.getvalue()
 
 
-def test_high_res_tiled_detection_query():
+def test_high_res_tiled_detection_query(authed_client):
     """Verify that submitting a query with an uploaded asset ID performs sliding-window detection and returns geo_boxes."""
     tiff_bytes = _create_large_geotiff_bytes(2400, 1800)
-    client = TestClient(app)
+    client = authed_client
 
     # 1. Upload the large GeoTIFF
     files = {"file": ("large_scene.tif", tiff_bytes, "image/tiff")}
@@ -54,7 +52,7 @@ def test_high_res_tiled_detection_query():
             {
                 "id": "img_001",
                 "modality": "optical",
-                "url_or_base64": asset_url,
+                "asset_id": up_data["asset_id"],
             }
         ],
     }

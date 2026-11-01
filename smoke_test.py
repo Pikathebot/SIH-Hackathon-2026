@@ -144,7 +144,9 @@ def create_sentinel1_sar_geotiff_base64(
     return f"data:image/tiff;base64,{b64_str}"
 
 
-def run_tests(base_url: str = None):
+def run_tests(base_url: str = None) -> bool:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # Windows consoles
     ai_mode = os.environ.get("AI_SERVICE_MODE", "real")
     print("=" * 70)
     print("         SatQuery AI — System Verification & Smoke Test")
@@ -156,10 +158,28 @@ def run_tests(base_url: str = None):
         client = httpx.Client(base_url=base_url, timeout=45.0)
         print(f"[*] Testing against live server: {base_url}\n")
     else:
+        # In-process runs get a throwaway DATA_DIR so they never write to backend/data.
+        import tempfile
+        os.environ.setdefault("DATA_DIR", tempfile.mkdtemp(prefix="satquery-smoke-"))
         from fastapi.testclient import TestClient
         from app.main import app
         client = TestClient(app)
+        client.__enter__()  # run startup (database migrations)
         print(f"[*] Testing in-process via FastAPI TestClient (AI_SERVICE_MODE={ai_mode})\n")
+
+    # API v2.0.0: everything except /health needs a signed-in user.
+    email, password = os.environ.get("SATQUERY_EMAIL"), os.environ.get("SATQUERY_PASSWORD")
+    if email and password:
+        auth = client.post("/api/v1/auth/login", json={"email": email, "password": password})
+    else:
+        import uuid
+        auth = client.post("/api/v1/auth/register", json={
+            "email": f"smoke-{uuid.uuid4().hex[:10]}@example.com", "password": uuid.uuid4().hex})
+    if auth.status_code not in (200, 201):
+        print(f"[!] Could not sign in ({auth.status_code}): {auth.text[:200]}")
+        print("    Set SATQUERY_EMAIL and SATQUERY_PASSWORD for a server with registration disabled.")
+        return False
+    client.headers["Authorization"] = f"Bearer {auth.json()['access_token']}"
 
     # Generate test fixtures
     s2_optical_tif = create_austrian_sentinel2_geotiff_base64()
@@ -336,10 +356,11 @@ def run_tests(base_url: str = None):
     else:
         print("\033[91mSome scenarios failed. Check logs above.\033[0m")
     print("=" * 70)
+    return passed == len(scenarios)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="SatQuery AI Smoke Test")
     parser.add_argument("--url", default=None, help="Live server URL, e.g. http://localhost:8000")
     args = parser.parse_args()
-    run_tests(args.url)
+    sys.exit(0 if run_tests(args.url) else 1)

@@ -6,12 +6,10 @@ import io
 import numpy as np
 from PIL import Image
 import pytest
-from fastapi.testclient import TestClient
 import rasterio
 import rasterio.transform
 
-from app.main import app
-from app.routers.upload import cleanup_expired_uploads, UPLOAD_DIR
+import uuid
 
 
 def _create_synthetic_geotiff_bytes(width: int = 500, height: int = 500) -> bytes:
@@ -34,17 +32,17 @@ def _create_synthetic_geotiff_bytes(width: int = 500, height: int = 500) -> byte
     return buf.getvalue()
 
 
-def test_upload_geotiff_success():
+def test_upload_geotiff_success(authed_client):
     """Verify multipart upload of a GeoTIFF returns asset ID, dimensions, preview, and geospatial metadata."""
     tiff_bytes = _create_synthetic_geotiff_bytes(600, 400)
-    client = TestClient(app)
+    client = authed_client
 
     files = {"file": ("satellite_scene.tif", tiff_bytes, "image/tiff")}
     response = client.post("/api/v1/upload", files=files)
 
     assert response.status_code == 200
     data = response.json()
-    assert data["asset_id"].startswith("ast_")
+    uuid.UUID(data["asset_id"])
     assert data["filename"] == "satellite_scene.tif"
     assert data["format"] == "geotiff"
     assert data["width"] == 600
@@ -60,28 +58,28 @@ def test_upload_geotiff_success():
     assert len(get_res.content) == len(tiff_bytes)
 
 
-def test_upload_standard_image():
+def test_upload_standard_image(authed_client):
     """Verify upload of a standard PNG."""
     img = Image.new("RGB", (300, 200), color=(100, 150, 200))
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     png_bytes = buf.getvalue()
 
-    client = TestClient(app)
+    client = authed_client
     files = {"file": ("test_optical.png", png_bytes, "image/png")}
     response = client.post("/api/v1/upload", files=files)
 
     assert response.status_code == 200
     data = response.json()
-    assert data["asset_id"].startswith("ast_")
+    uuid.UUID(data["asset_id"])
     assert data["format"] == "standard"
     assert data["width"] == 300
     assert data["height"] == 200
     assert data["geospatial"] is None
 
 
-def test_asset_not_found():
+def test_asset_not_found(authed_client):
     """Verify 404 for invalid asset ID."""
-    client = TestClient(app)
-    response = client.get("/api/v1/assets/ast_nonexistent999.tif")
+    response = authed_client.get(f"/api/v1/assets/{uuid.uuid4()}")
     assert response.status_code == 404
+    assert response.json()["error"]["code"] == "NOT_FOUND"

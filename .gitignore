@@ -35,6 +35,10 @@ backend/data/images/*
 !backend/data/images/.gitkeep
 backend/data/uploads/*
 !backend/data/uploads/.gitkeep
+backend/data/evidence/
+# Auto-generated JWT signing key (when SECRET_KEY is unset) and DB backups
+.secret_key
+*.db.bak-*
 
 # Raw Satellite Archives & Sample Imagery
 *.SAFE

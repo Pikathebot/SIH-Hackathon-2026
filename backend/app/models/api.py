@@ -1,13 +1,13 @@
 """
 Pydantic models for the HTTP API layer.
 
-These match API_CONTRACT.md v1.0.0 exactly — field names are snake_case,
+These match API_CONTRACT.md v2.0.0 exactly — field names are snake_case,
 enum values come from CONTRACT.md §5.
 """
 
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field, model_validator
 
 
 # ---------------------------------------------------------------------------
@@ -18,13 +18,21 @@ class ImageInput(BaseModel):
     id: str
     modality: str = Field(..., pattern=r"^(optical|sar)$")
     date: Optional[str] = None          # ISO-8601 date string, optional
-    url_or_base64: str
+    url_or_base64: Optional[str] = None
+    asset_id: Optional[str] = None      # v2.0.0: id from POST /api/v1/upload
+
+    @model_validator(mode="after")
+    def _one_source(self):
+        if bool(self.url_or_base64) == bool(self.asset_id):
+            raise ValueError("provide exactly one of url_or_base64 or asset_id")
+        return self
 
 
 class QueryRequest(BaseModel):
     """POST /api/v1/query request body — API_CONTRACT.md §1."""
     query: str = Field(..., min_length=1, max_length=2000)
     images: list[ImageInput] = Field(..., min_length=1, max_length=2)
+    session_id: Optional[str] = None    # v2.0.0
 
 
 class GeospatialMetadata(BaseModel):
@@ -99,3 +107,56 @@ class HealthResponse(BaseModel):
     fusion_loaded: bool
     # Additive (API_CONTRACT v1.2): active engine + model-server reachability
     engine: Optional[dict] = None
+
+
+# ---------------------------------------------------------------------------
+# Auth, sessions and history — API_CONTRACT.md §5 (v2.0.0)
+# ---------------------------------------------------------------------------
+class RegisterRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(..., min_length=10, max_length=128)
+
+
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(..., min_length=1, max_length=128)
+
+
+class UserOut(BaseModel):
+    id: str
+    email: str
+    role: str
+    created_at: str
+
+
+class AuthResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    expires_in: int
+    user: UserOut
+
+
+class SessionCreate(BaseModel):
+    title: str = Field(default="New analysis", min_length=1, max_length=200)
+
+
+class SessionUpdate(BaseModel):
+    title: str = Field(..., min_length=1, max_length=200)
+
+
+class SessionOut(BaseModel):
+    id: str
+    title: str
+    created_at: str
+    updated_at: str
+    query_count: int = 0
+
+
+class HistoryEntry(BaseModel):
+    id: str
+    query_text: str
+    created_at: str
+    status: str
+    error_code: Optional[str] = None
+    image_asset_ids: list[str]
+    response: Optional[QueryResponse] = None

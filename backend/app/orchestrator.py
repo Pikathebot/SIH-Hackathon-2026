@@ -17,8 +17,6 @@ import io
 import json
 import logging
 import re
-import uuid
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -255,86 +253,70 @@ async def _maybe_llm_intent(request: QueryRequest, keyword_task: str) -> str:
 # Image decoding — base64/URL/Asset → PIL.Image at the API boundary
 # AI modules work with PIL.Image.Image objects, never raw base64.
 # ---------------------------------------------------------------------------
+def _decode_file(path: Path) -> Tuple[Image.Image, Optional[GeoMetadata]]:
+    """Decode a server-side file (an owned, already-resolved asset). Never called with client paths."""
+    img, geo_meta = process_geotiff(path)
+    img._file_source = str(path)  # lets large rasters use the tiled detection path
+    img._geo_meta = geo_meta
+    return img, geo_meta
+
+
 def _decode_image(url_or_base64: str) -> Tuple[Image.Image, Optional[GeoMetadata]]:
-    """Decode a base64 string, asset ID, local path, or URL to a PIL Image and optional GeoMetadata."""
+    """Decode a base64 payload (optionally a data: URI) or a public http(s) URL to a PIL Image.
+
+    Uploaded assets are resolved (with an ownership check) by process_query before this
+    is called; local filesystem paths are never accepted (API_CONTRACT v2.0.0).
+    """
+    from app.config import settings
+    from app.image_sources import UnsafeUrlError, fetch_public_url, parse_asset_ref
+
     data = url_or_base64.strip()
+    if parse_asset_ref(data):
+        raise QueryValidationError(
+            code="UNSUPPORTED_FORMAT",
+            message="Uploaded images must be referenced through a query's asset_id.",
+        )
 
-    # 1. Handle local uploaded asset references (/api/v1/assets/ast_..., ast_...)
-    asset_id = None
-    if "/api/v1/assets/" in data:
-        asset_id = data.split("/api/v1/assets/")[-1].strip()
-    elif data.startswith("ast_"):
-        asset_id = data
-    elif data.startswith("assets/"):
-        asset_id = data.split("assets/")[-1].strip()
-
-    if asset_id:
-        from app.config import UPLOADS_DIR
-        upload_dirs = [UPLOADS_DIR]
-        matched_file = None
-        for u_dir in upload_dirs:
-            matches = list(u_dir.glob(f"{asset_id}.*"))
-            if matches and matches[0].exists():
-                matched_file = matches[0]
-                break
-
-        if matched_file:
-            img, geo_meta = process_geotiff(matched_file)
-            img._file_source = str(matched_file)
-            img._geo_meta = geo_meta
-            return img, geo_meta
-
-    # 2. Handle direct local file path if exists
-    try:
-        p = Path(data)
-        if p.exists() and p.is_file():
-            img, geo_meta = process_geotiff(p)
-            img._file_source = str(p)
-            img._geo_meta = geo_meta
-            return img, geo_meta
-    except Exception:
-        pass
-
-    # 3. Handle data URI scheme (e.g. "data:image/png;base64,iVBOR...")
-    if data.startswith("data:"):
-        _, _, after_comma = data.partition(",")
-        data = after_comma
-
-    # 4. Try base64 decode
-    try:
-        image_bytes = base64.b64decode(data)
-        if is_geotiff(image_bytes):
-            img, geo_meta = process_geotiff(image_bytes)
-            img._geo_meta = geo_meta
-            return img, geo_meta
-        img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-        return img, None
-    except Exception:
-        pass
-
-    # 5. Try URL
+    # 1. Remote URL
     if data.startswith(("http://", "https://")):
         try:
-            import httpx
-            response = httpx.get(data, timeout=30.0, follow_redirects=True)
-            response.raise_for_status()
-            image_bytes = response.content
-            if is_geotiff(image_bytes):
-                img, geo_meta = process_geotiff(image_bytes)
-                img._geo_meta = geo_meta
-                return img, geo_meta
-            img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-            return img, None
+            image_bytes = fetch_public_url(data, max_bytes=settings.max_upload_mb * 1024 * 1024)
+        except UnsafeUrlError as exc:
+            raise QueryValidationError(code="UNSUPPORTED_FORMAT", message=str(exc)) from exc
         except Exception as exc:
             raise QueryValidationError(
                 code="UNSUPPORTED_FORMAT",
-                message=f"Failed to download image from URL: {exc}",
+                message="Failed to download the image from the URL.",
+                detail=str(exc),
             ) from exc
+        return _decode_bytes(image_bytes)
+
+    # 2. data URI / raw base64
+    if data.startswith("data:"):
+        _, _, data = data.partition(",")
+    try:
+        image_bytes = base64.b64decode(data, validate=False)
+        return _decode_bytes(image_bytes)
+    except QueryValidationError:
+        raise
+    except Exception:
+        pass
 
     raise QueryValidationError(
         code="UNSUPPORTED_FORMAT",
-        message="Could not decode image. Provide a valid base64 string, asset ID, or HTTPS URL.",
+        message="Could not decode image. Provide a valid base64 string, an uploaded asset, or an https URL.",
     )
+
+
+def _decode_bytes(image_bytes: bytes) -> Tuple[Image.Image, Optional[GeoMetadata]]:
+    if is_geotiff(image_bytes):
+        img, geo_meta = process_geotiff(image_bytes)
+        img._geo_meta = geo_meta
+        return img, geo_meta
+    try:
+        return Image.open(io.BytesIO(image_bytes)).convert("RGB"), None
+    except Exception as exc:
+        raise QueryValidationError(code="UNSUPPORTED_FORMAT", message="Unsupported or corrupt image data.") from exc
 
 
 def _compute_image_checksum(image: Image.Image) -> str:
@@ -527,108 +509,118 @@ def _assemble_response(
 
 
 # ---------------------------------------------------------------------------
-# DB audit logging — non-blocking, failure never breaks the response
+# Persistence: images, evidence file and the query row (DATABASE_CONTRACT v1.1.0)
 # ---------------------------------------------------------------------------
-async def _log_query_to_db(
+async def _persist_query(
+    db,
+    user_id: str,
     request: QueryRequest,
-    task: str,
     response: QueryResponse,
+    decoded_images: list,
+    asset_ids: list[Optional[str]],
     image_checksums: list[str],
-) -> None:
+) -> str:
+    """Store the query so the session history can re-render it. Returns the query id.
+
+    Images sent inline (base64/URL) are saved as the user's assets (PNG) so history
+    thumbnails work; uploaded assets are referenced, not copied. visual_evidence is
+    written to a JSON file and referenced by path, never stored as base64 in the DB.
     """
-    Log the query and images to the SQLite database.
+    from app.config import DATA_DIR, EVIDENCE_DIR, UPLOADS_DIR
+    from app.models.db import AnalysisSession, ImageRecord, QueryRecord, new_id, utc_now
 
-    This is best-effort — if it fails, we log the error but do not
-    let it affect the API response. Per DATABASE_CONTRACT.md, persistence
-    is not required for the core demo to function.
-    """
-    try:
-        from app.database import get_db
+    now = utc_now()
+    image_ids: list[str] = []
+    for img_input, img, asset_id, checksum in zip(request.images, decoded_images, asset_ids, image_checksums):
+        if asset_id:
+            image_ids.append(asset_id)
+            continue
+        image_id = new_id()
+        user_dir = UPLOADS_DIR / user_id
+        user_dir.mkdir(parents=True, exist_ok=True)
+        path = user_dir / f"{image_id}.png"
+        await asyncio.to_thread(img.convert("RGB").save, path, "PNG")
+        db.add(ImageRecord(
+            id=image_id, modality=img_input.modality, capture_date=img_input.date,
+            storage_path=path.relative_to(DATA_DIR).as_posix(), checksum=checksum, created_at=now,
+            user_id=user_id, filename=f"{img_input.id}.png", size_bytes=path.stat().st_size,
+        ))
+        image_ids.append(image_id)
 
-        query_id = str(uuid.uuid4())
-        now = datetime.now(timezone.utc).isoformat()
+    query_id = new_id()
+    ev_dir = EVIDENCE_DIR / user_id
+    ev_dir.mkdir(parents=True, exist_ok=True)
+    ev_path = ev_dir / f"{query_id}.json"
+    await asyncio.to_thread(ev_path.write_text, response.visual_evidence.model_dump_json(), "utf-8")
 
-        db = await get_db()
-        try:
-            # Insert image rows
-            image_ids = []
-            for img_input, checksum in zip(request.images, image_checksums):
-                image_id = str(uuid.uuid4())
-                image_ids.append(image_id)
-                await db.execute(
-                    """
-                    INSERT INTO images (id, modality, capture_date, storage_path, checksum, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        image_id,
-                        img_input.modality,
-                        img_input.date,
-                        f"images/{image_id}.png",  # placeholder path
-                        checksum,
-                        now,
-                    ),
-                )
-
-            # Insert query row
-            es = response.execution_summary
-            ve = response.visual_evidence
-            await db.execute(
-                """
-                INSERT INTO queries (
-                    id, query_text, image_ids, selected_task, tool_used,
-                    parameters, answer, confidence, visual_evidence_type,
-                    visual_evidence_ref, latency_ms, inputs_validated,
-                    status, error_code, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    query_id,
-                    request.query,
-                    json.dumps(image_ids),
-                    es.selected_task,
-                    es.tool_used,
-                    json.dumps(es.parameters),
-                    response.answer,
-                    response.confidence,
-                    ve.type,
-                    None,  # visual_evidence_ref — not persisting overlays to disk for now
-                    es.latency_ms,
-                    1,  # inputs_validated = True
-                    "success",
-                    None,
-                    now,
-                ),
-            )
-            await db.commit()
-            logger.info("Query logged to DB: %s", query_id)
-        finally:
-            await db.close()
-
-    except Exception:
-        logger.exception("Failed to log query to DB (non-critical)")
+    es = response.execution_summary
+    db.add(QueryRecord(
+        id=query_id, query_text=request.query, image_ids=json.dumps(image_ids),
+        selected_task=es.selected_task, tool_used=es.tool_used, parameters=json.dumps(es.parameters),
+        answer=response.answer, confidence=response.confidence,
+        visual_evidence_type=response.visual_evidence.type,
+        visual_evidence_ref=ev_path.relative_to(DATA_DIR).as_posix(),
+        latency_ms=es.latency_ms, inputs_validated=1, status="success", error_code=None,
+        created_at=now, user_id=user_id, session_id=request.session_id,
+    ))
+    if request.session_id:
+        session = await db.get(AnalysisSession, request.session_id)
+        if session is not None:
+            session.updated_at = now
+    await db.commit()
+    return query_id
 
 
 # ---------------------------------------------------------------------------
 # Main entry point — called by the router
 # ---------------------------------------------------------------------------
-async def process_query(request: QueryRequest) -> QueryResponse:
+async def process_query(request: QueryRequest, user=None, db=None) -> QueryResponse:
     """
     Full orchestrator pipeline:
-    validate → classify → decode → dispatch AI → assemble response → log to DB.
+    validate → check session → resolve assets → classify → decode → dispatch AI →
+    assemble response → persist (when called with a user and DB session).
     """
+    from app.errors import ApiError
+    from app.image_sources import parse_asset_ref, resolve_owned_asset
+    from app.models.db import AnalysisSession
+
     # 1. Validate inputs
     validate_inputs(request)
 
-    # 2. Classify intent — keyword rules first, then (optionally) the VLM for
+    # 2. Ownership checks happen before any model work
+    if request.session_id:
+        session = await db.get(AnalysisSession, request.session_id) if db is not None else None
+        if session is None or user is None or session.user_id != user.id:
+            raise ApiError(404, "NOT_FOUND", "Analysis session not found.")
+
+    asset_ids: list[Optional[str]] = []
+    asset_paths: list[Optional[Path]] = []
+    for img in request.images:
+        asset_id = img.asset_id or parse_asset_ref(img.url_or_base64)
+        if asset_id:
+            if user is None or db is None:
+                raise ApiError(404, "NOT_FOUND", "Image not found.")
+            _, path = await resolve_owned_asset(db, user.id, asset_id)
+            asset_ids.append(asset_id)
+            asset_paths.append(path)
+        else:
+            asset_ids.append(None)
+            asset_paths.append(None)
+
+    # 3. Classify intent — keyword rules first, then (optionally) the VLM for
     #    single-image queries; any LLM failure keeps the keyword result.
     task = classify_intent(request)
     task = await _maybe_llm_intent(request, task)
 
-    # 3. Decode images (sync — fast operation)
-    decoded_pairs = [_decode_image(img.url_or_base64) for img in request.images]
+    # 4. Decode images (file decode and URL download run off the event loop)
+    decoded_pairs = []
+    for img, path in zip(request.images, asset_paths):
+        if path is not None:
+            decoded_pairs.append(await asyncio.to_thread(_decode_file, path))
+        else:
+            decoded_pairs.append(await asyncio.to_thread(_decode_image, img.url_or_base64))
     decoded_images = [pair[0] for pair in decoded_pairs]
-    
+
     # Extract geospatial metadata for all available images
     primary_geo_meta = None
     secondary_geo_meta = None
@@ -644,9 +636,6 @@ async def process_query(request: QueryRequest) -> QueryResponse:
             primary_geo_meta = geo0
         elif geo1:
             primary_geo_meta = geo1
-
-    # 4. Compute checksums for DB logging
-    image_checksums = [_compute_image_checksum(img) for img in decoded_images]
 
     # 5. Dispatch to AI function (sync functions → run in thread pool)
     from ai_service.common.errors import AIServiceError
@@ -670,7 +659,15 @@ async def process_query(request: QueryRequest) -> QueryResponse:
         secondary_geo_meta=secondary_geo_meta,
     )
 
-    # 7. Log to DB (non-blocking, best-effort)
-    await _log_query_to_db(request, task, response, image_checksums)
+    # 7. Persist for history. Best-effort: a storage failure must not lose the answer.
+    if user is not None and db is not None:
+        try:
+            # Only inline images need hashing; uploaded assets already have a checksum row.
+            checksums = [await asyncio.to_thread(_compute_image_checksum, img) if aid is None else ""
+                         for img, aid in zip(decoded_images, asset_ids)]
+            await _persist_query(db, user.id, request, response, decoded_images, asset_ids, checksums)
+        except Exception:
+            await db.rollback()
+            logger.exception("Failed to persist query (answer still returned)")
 
     return response

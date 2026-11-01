@@ -138,9 +138,10 @@ def create_sentinel1_sar_water_geotiff_base64(
 
 
 @pytest_asyncio.fixture
-async def client():
+async def client(auth_headers):
+    """Async HTTP client wired to the FastAPI app, signed in as a fresh user."""
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+    async with AsyncClient(transport=transport, base_url="http://test", headers=auth_headers) as ac:
         yield ac
 
 
