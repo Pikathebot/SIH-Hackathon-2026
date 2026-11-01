@@ -1,6 +1,6 @@
 # API_CONTRACT.md — Frontend ↔ Backend HTTP Contract
 
-**Version:** 2.1.0 (2.1.0 adds `GET /assets/{asset_id}/preview`; 2.0.0 made `/query`, `/upload`, `/assets` and `/preview` require authentication; see §5)
+**Version:** 2.2.0 (2.2.0 adds `HistoryEntry.images`; 2.1.0 adds `GET /assets/{asset_id}/preview`; 2.0.0 made `/query`, `/upload`, `/assets` and `/preview` require authentication; see §5)
 **Base URL (local dev):** `http://localhost:8000`
 **Consumers:** `frontend/` (Person 4)
 **Producers:** `backend/` (Person 3)
@@ -237,8 +237,11 @@ Every endpoint requires `Authorization: Bearer <access_token>`, except `GET /hea
 // HistoryEntry: enough to show a past exchange again
 { "id": "uuid", "query_text": "Locate all ships", "created_at": "...", "status": "success | error",
   "error_code": null, "image_asset_ids": ["uuid"],
+  "images": [{ "asset_id": "uuid", "modality": "optical | sar", "date": "2024-03-02 or null" }],
   "response": { /* the full QueryResponse body from §1, or null when status = "error" */ } }
 ```
+
+*(v2.2.0)* `images` lists each submitted image in request order, with the `modality` and `date` given in that query. For queries stored before v2.2.0, `modality` and `date` are `null`. `image_asset_ids` stays for compatibility and equals `images[].asset_id`.
 
 ### Uploads and assets
 

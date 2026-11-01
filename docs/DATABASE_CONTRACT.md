@@ -122,4 +122,4 @@ All new columns allow NULL, so rows from before v1.1.0 stay valid.
 
 **Storage paths.** Both paths are relative to `DATA_DIR`.
 - `images.storage_path`: uploads are stored at `uploads/<user_id>/<image_id>.<ext>`.
-- `queries.visual_evidence_ref`: points to a JSON file at `evidence/<user_id>/<query_id>.json` holding the response's `visual_evidence`. History can then be shown again without storing base64 in the database.
+- `queries.visual_evidence_ref`: points to a JSON file at `evidence/<user_id>/<query_id>.json` of the form `{"visual_evidence": {...}, "images": [{"asset_id", "modality", "date"}]}`. The `images` list records the per-query modality and date of each input. Files written before API v2.2.0 hold the bare `visual_evidence` object. History can then be shown again without storing base64 in the database.
