@@ -1,6 +1,6 @@
 # DATABASE_CONTRACT.md — Persistence Schema
 
-**Version:** 1.0.0
+**Version:** 1.1.0 (additive: users, analysis_sessions and refresh_tokens tables, ownership columns, Alembic migrations; see §5)
 **Owner:** Person 3 (backend) — schema changes go through the same PR process as `CONTRACT.md` §6.
 **Engine (sprint default):** SQLite via SQLAlchemy, file at `backend/data/satquery.db`. Swappable to Postgres post-hackathon without schema changes (types below are chosen to be portable).
 
@@ -60,8 +60,66 @@ One row per `POST /api/v1/query` call — the audit log the execution-summary pa
 
 - Model checkpoints, LoRA adapter weights → filesystem, referenced by path in code/config, not DB rows.
 - Base64 image payloads or full-resolution overlay images → filesystem, referenced by path.
-- Session/auth state → out of scope for this sprint (no auth planned).
+- Passwords in any reversible form. Only argon2 hashes go in `users.password_hash`.
+- Raw refresh tokens. Only their SHA-256 hash goes in `refresh_tokens.token_hash`.
 
 ## 4. Migration policy for the sprint
 
 Given the timeline, use SQLAlchemy's `create_all()` against this schema directly rather than standing up Alembic migrations. If the schema changes mid-sprint, delete and recreate `satquery.db` locally — do not attempt to hand-migrate. This is acceptable only because the DB holds no data that isn't reproducible from a fresh demo run.
+
+---
+
+## 5. v1.1.0: accounts and ownership (replaces §4)
+
+**Engine.** SQLAlchemy 2 (async). The connection URL comes from `DATABASE_URL`, which defaults to `sqlite+aiosqlite:///<DATA_DIR>/satquery.db`. Switching to Postgres only requires changing that URL. IDs are still UUID v4 `TEXT`, and timestamps are still ISO-8601 UTC `TEXT`.
+
+**Migrations.** Alembic, in `backend/alembic/`.
+- Revision `0001` is the v1.0.0 schema, including the v1.1.0 `tool_used` values.
+- Revision `0002` adds the tables and columns below.
+- On startup the backend runs `alembic upgrade head`.
+- If a database already has the `0001` tables but no `alembic_version` row, it is marked as `0001` first. Existing local databases are therefore upgraded in place instead of being deleted.
+
+§4's "delete and recreate" policy no longer applies.
+
+### `users` (new)
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| `id` | `TEXT` | PK, UUID v4 | |
+| `email` | `TEXT` | NOT NULL, UNIQUE | Stored in lower case |
+| `password_hash` | `TEXT` | NOT NULL | argon2id via `pwdlib` |
+| `role` | `TEXT` | NOT NULL, enum: `user`\|`admin`, default `user` | |
+| `created_at` | `TEXT` | NOT NULL | |
+
+### `analysis_sessions` (new)
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| `id` | `TEXT` | PK, UUID v4 | |
+| `user_id` | `TEXT` | NOT NULL, FK `users.id` ON DELETE CASCADE, indexed | |
+| `title` | `TEXT` | NOT NULL | |
+| `created_at` | `TEXT` | NOT NULL | |
+| `updated_at` | `TEXT` | NOT NULL | Updated whenever a query is added |
+
+### `refresh_tokens` (new)
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| `id` | `TEXT` | PK, UUID v4 | |
+| `user_id` | `TEXT` | NOT NULL, FK `users.id` ON DELETE CASCADE, indexed | |
+| `token_hash` | `TEXT` | NOT NULL, UNIQUE | SHA-256 hex of the cookie value |
+| `expires_at` | `TEXT` | NOT NULL | |
+| `revoked_at` | `TEXT` | NULL | Set when the token is replaced or the user logs out |
+| `created_at` | `TEXT` | NOT NULL | |
+
+### New columns on existing tables
+All new columns allow NULL, so rows from before v1.1.0 stay valid.
+
+| Table | Column | Type | Notes |
+|---|---|---|---|
+| `images` | `user_id` | `TEXT`, indexed | Owner. NULL for older rows |
+| `images` | `filename` | `TEXT` | Original upload filename |
+| `images` | `size_bytes` | `INTEGER` | |
+| `queries` | `user_id` | `TEXT`, indexed | |
+| `queries` | `session_id` | `TEXT`, indexed | `analysis_sessions.id`. Deleting a session deletes its queries |
+
+**Storage paths.** Both paths are relative to `DATA_DIR`.
+- `images.storage_path`: uploads are stored at `uploads/<user_id>/<image_id>.<ext>`.
+- `queries.visual_evidence_ref`: points to a JSON file at `evidence/<user_id>/<query_id>.json` holding the response's `visual_evidence`. History can then be shown again without storing base64 in the database.

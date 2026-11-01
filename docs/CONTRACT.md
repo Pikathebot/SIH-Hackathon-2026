@@ -1,6 +1,6 @@
 # CONTRACT.md — SatQuery AI Single Source of Truth
 
-**Status:** v1.1.0 (additive: Qwen-VL engine `tool_used` values) — productization phase — see "How to change this contract" before editing anything.
+**Status:** v1.2.0 (adds the `role` enum; API_CONTRACT v2.0.0 adds auth, DATABASE_CONTRACT v1.1.0 adds accounts) — productization phase — see "How to change this contract" before editing anything.
 **Applies to:** all humans and AI coding agents (Codex, Claude, Antigravity, etc.) working on any module of SatQuery AI.
 
 This document is the root of the contract set. If any other doc, any code comment, or any agent's assumption disagrees with these files, **these files win.** Code is wrong until the contract is updated; the contract is never silently overridden by code.
@@ -71,6 +71,9 @@ Without a written contract, each of these will independently invent endpoint nam
 
 ### `visual_evidence.type`
 `none` | `bbox` | `mask`
+
+### `role` (user role, v1.2.0)
+`user` | `admin`
 
 If you need a value not on these lists, propose an addition via the change process in §6 — do not invent a new string and ship it.
 

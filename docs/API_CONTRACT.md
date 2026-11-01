@@ -1,6 +1,6 @@
 # API_CONTRACT.md — Frontend ↔ Backend HTTP Contract
 
-**Version:** 1.2.0
+**Version:** 2.0.0 (breaking: `/query`, `/upload`, `/assets` and `/preview` now require authentication; see §5)
 **Base URL (local dev):** `http://localhost:8000`
 **Consumers:** `frontend/` (Person 4)
 **Producers:** `backend/` (Person 3)
@@ -18,6 +18,7 @@ Submit a natural-language query with 1–2 images. This is the **only** endpoint
 **Headers**
 ```
 Content-Type: application/json
+Authorization: Bearer <access_token>      (v2.0.0, required; see §5)
 ```
 
 **Request body**
@@ -29,11 +30,15 @@ Content-Type: application/json
       "id": "string, required, unique within this request, e.g. 'img1'",
       "modality": "optical | sar",
       "date": "ISO-8601 date string, optional, e.g. '2023-01-15'",
-      "url_or_base64": "string, required — either an https URL or a raw base64-encoded image payload"
+      "url_or_base64": "string — an https URL, a base64-encoded image payload (optionally a data: URI), or an asset URL '/api/v1/assets/<asset_id>'",
+      "asset_id": "string, optional (v2.0.0) — id returned by POST /api/v1/upload; use instead of url_or_base64"
     }
-  ]
+  ],
+  "session_id": "string, optional (v2.0.0) — attach this query to one of the caller's analysis sessions"
 }
 ```
+
+*(v2.0.0)* Each image needs exactly one of `url_or_base64` or `asset_id`. An asset must belong to the caller; if it doesn't, the API returns `404` so asset ids can't be probed. Remote URLs must resolve to public internet addresses. Loopback, private, link-local and reserved addresses are rejected with `UNSUPPORTED_FORMAT`. Local filesystem paths are not accepted. An unknown `session_id`, or one belonging to another user, returns `404 NOT_FOUND`.
 
 Constraints:
 - `images` array length must be 1 or 2. Zero or 3+ images → `400` (see §3).
@@ -81,7 +86,7 @@ Field notes:
 ```json
 {
   "error": {
-    "code": "INVALID_IMAGE_COUNT | INVALID_MODALITY_COMBINATION | UNSUPPORTED_FORMAT | MODEL_INFERENCE_FAILED | INTERNAL_ERROR",
+    "code": "INVALID_IMAGE_COUNT | INVALID_MODALITY_COMBINATION | UNSUPPORTED_FORMAT | MODEL_INFERENCE_FAILED | INTERNAL_ERROR | UNAUTHORIZED | FORBIDDEN | NOT_FOUND | CONFLICT | VALIDATION_ERROR | PAYLOAD_TOO_LARGE",
     "message": "human-readable string safe to display to the user",
     "detail": "optional string, technical detail for logs — frontend should not display this to end users"
   }
@@ -96,6 +101,12 @@ Status code mapping:
 | `UNSUPPORTED_FORMAT` | 400 |
 | `MODEL_INFERENCE_FAILED` | 502 |
 | `INTERNAL_ERROR` | 500 |
+| `UNAUTHORIZED` *(v2.0.0)* | 401 |
+| `FORBIDDEN` *(v2.0.0)* | 403 |
+| `NOT_FOUND` *(v2.0.0)* | 404 |
+| `CONFLICT` *(v2.0.0)* | 409 |
+| `VALIDATION_ERROR` *(v2.0.0)* | 422 |
+| `PAYLOAD_TOO_LARGE` *(v2.0.0)* | 413 |
 
 The backend must **never** let an unhandled exception produce a bare 500 with no JSON body — every error path returns this shape. This matters because the frontend's error-handling code is written once against this contract and should never need a try/catch around JSON parsing itself.
 
@@ -178,4 +189,66 @@ Trivial liveness check for local dev / demo rehearsal, no auth.
 
 - The backend owns all validation. Never trust the frontend to have pre-validated image counts/modalities.
 - The backend must populate `execution_summary` even when returning a degraded/fallback answer (e.g. AI service timeout with a partial result) — set `inputs_validated: true` and note the degradation in `parameters` rather than omitting the summary.
-- CORS: allow `http://localhost:3000` (or whatever the frontend dev port is) explicitly during development; do not use `*` once any auth is added later.
+- CORS: origins come from the `CORS_ORIGINS` setting, a comma-separated list that defaults to `http://localhost:3000,http://127.0.0.1:3000`. Never use `*`, because credentials are allowed.
+
+---
+
+## 5. Authentication, sessions, uploads and history *(v2.0.0)*
+
+All endpoints below are under `/api/v1`. They use JSON with snake_case fields and return the §1 error shape on failure.
+
+Every endpoint requires `Authorization: Bearer <access_token>`, except `GET /health` and `POST /auth/register`, `/auth/login`, `/auth/refresh` and `/auth/logout`. A missing, expired or invalid token returns `401 UNAUTHORIZED`. Users only ever see their own sessions, queries and assets. Another user's id behaves exactly like a missing one and returns `404 NOT_FOUND`.
+
+**Tokens.**
+- `access_token` is a JWT valid for 15 minutes. It is sent in the `Authorization` header. The frontend keeps it in memory, never in `localStorage`.
+- The refresh token is an opaque value in a cookie named `satquery_refresh`. The cookie is `httpOnly` and `SameSite=Lax`, is scoped to the path `/api/v1/auth`, and is valid for 14 days.
+- The refresh token is replaced on every refresh, and logout revokes it on the server.
+
+### Auth
+
+| Method & path | Body | 2xx response |
+|---|---|---|
+| `POST /auth/register` | `{"email": str, "password": str (10-128 chars)}` | `201` `AuthResponse` plus the refresh cookie. An email that is already registered returns `409 CONFLICT`. When `ALLOW_REGISTRATION=false`, returns `403 FORBIDDEN` |
+| `POST /auth/login` | `{"email": str, "password": str}` | `200` `AuthResponse` plus the refresh cookie. A wrong email or password returns `401 UNAUTHORIZED`, with the same message for both |
+| `POST /auth/refresh` | none (uses the cookie) | `200` `AuthResponse` plus a new cookie. A missing, expired or revoked cookie returns `401` |
+| `POST /auth/logout` | none (uses the cookie) | `204`. Revokes the refresh token and clears the cookie. Safe to call more than once |
+| `GET /auth/me` | none | `200` `User` |
+
+```json
+// AuthResponse
+{ "access_token": "eyJ...", "token_type": "bearer", "expires_in": 900,
+  "user": { "id": "uuid", "email": "a@example.com", "role": "user | admin", "created_at": "2026-11-01T12:00:00Z" } }
+```
+
+### Analysis sessions
+
+| Method & path | Body | 2xx response |
+|---|---|---|
+| `GET /sessions` | none | `200` `[Session]`, most recently updated first |
+| `POST /sessions` | `{"title": str (1-200)}`, optional; defaults to `"New analysis"` | `201` `Session` |
+| `GET /sessions/{session_id}` | none | `200` `Session` |
+| `PATCH /sessions/{session_id}` | `{"title": str (1-200)}` | `200` `Session` |
+| `DELETE /sessions/{session_id}` | none | `204`. Also deletes the session's queries |
+| `GET /sessions/{session_id}/queries` | none | `200` `[HistoryEntry]`, oldest first |
+
+```json
+// Session
+{ "id": "uuid", "title": "Rotterdam port", "created_at": "...", "updated_at": "...", "query_count": 3 }
+// HistoryEntry: enough to show a past exchange again
+{ "id": "uuid", "query_text": "Locate all ships", "created_at": "...", "status": "success | error",
+  "error_code": null, "image_asset_ids": ["uuid"],
+  "response": { /* the full QueryResponse body from §1, or null when status = "error" */ } }
+```
+
+### Uploads and assets
+
+`POST /upload` takes `multipart/form-data` with one `file` field. Accepted types are GeoTIFF, JPEG 2000, PNG and JPEG. The type is checked from the file's magic bytes, not its extension. A file larger than `MAX_UPLOAD_MB` returns `413 PAYLOAD_TOO_LARGE`. Any other type returns `400 UNSUPPORTED_FORMAT`. A successful upload returns `200`:
+```json
+{ "asset_id": "uuid", "filename": "scene.tif", "url": "/api/v1/assets/<asset_id>",
+  "preview_base64": "data:image/png;base64,...", "format": "geotiff | standard",
+  "width": 10980, "height": 10980, "size_bytes": 123456789, "geospatial": null }
+```
+
+`GET /assets/{asset_id}` returns the original file. Only the owner can fetch it; anyone else gets `404`.
+
+`POST /preview` keeps the same body and response. It now requires authentication and follows the same URL rules as `/query`.
