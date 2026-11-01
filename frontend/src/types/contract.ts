@@ -57,6 +57,7 @@ export interface QueryImage {
   modality: Modality;
   date?: string; // ISO-8601 YYYY-MM-DD
   url_or_base64: string;
+  asset_id?: string; // v2: uploaded asset (sent instead of url_or_base64)
   previewUrl?: string; // Client-side helper for thumbnails
   name?: string;
 }
@@ -67,8 +68,10 @@ export interface QueryRequest {
     id: string;
     modality: Modality;
     date?: string;
-    url_or_base64: string;
+    url_or_base64?: string;
+    asset_id?: string;
   }>;
+  session_id?: string;
 }
 
 export interface QueryResponse {
@@ -85,6 +88,12 @@ export type ErrorCode =
   | 'UNSUPPORTED_FORMAT' 
   | 'MODEL_INFERENCE_FAILED' 
   | 'INTERNAL_ERROR'
+  | 'UNAUTHORIZED'
+  | 'FORBIDDEN'
+  | 'NOT_FOUND'
+  | 'CONFLICT'
+  | 'VALIDATION_ERROR'
+  | 'PAYLOAD_TOO_LARGE'
   | string;
 
 export interface ApiError {
@@ -124,4 +133,38 @@ export interface ChatMessage {
   };
   loading?: boolean;
   loadingStep?: string;
+}
+
+// ── API_CONTRACT.md v2 §5: auth, sessions, history ─────────────────────────
+export interface User {
+  id: string;
+  email: string;
+  role: 'user' | 'admin' | string;
+  created_at: string;
+}
+
+export interface AuthResponse {
+  access_token: string;
+  token_type: 'bearer';
+  expires_in: number;
+  user: User;
+}
+
+export interface SessionDto {
+  id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  query_count: number;
+}
+
+export interface HistoryEntry {
+  id: string;
+  query_text: string;
+  created_at: string;
+  status: 'success' | 'error';
+  error_code?: string | null;
+  image_asset_ids: string[];
+  images: Array<{ asset_id: string; modality?: Modality | null; date?: string | null }>;
+  response?: QueryResponse | null;
 }

@@ -11,17 +11,21 @@ import {
   Globe2,
   Clock,
   HelpCircle,
+  LogOut,
+  UserCircle2,
 } from 'lucide-react';
 
 interface SidebarProps {
   sessions: AnalysisSession[];
-  activeSessionId: string;
+  activeSessionId: string | null;
   onSelectSession: (id: string) => void;
   onNewAnalysis: () => void;
   onDeleteSession: (id: string) => void;
   onClearHistory: () => void;
   isOpenMobile?: boolean;
   onCloseMobile?: () => void;
+  userEmail?: string;
+  onSignOut?: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -33,6 +37,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onClearHistory,
   isOpenMobile,
   onCloseMobile,
+  userEmail,
+  onSignOut,
 }) => {
   const getTaskIcon = (task?: string) => {
     switch (task) {
@@ -168,9 +174,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
           )}
         </ul>
 
-        {/* ── Footer: Clear all ── */}
-        {sessions.length > 0 && (
-          <div className="px-3 py-2.5 border-t border-grid-hairline flex-shrink-0 bg-surface-container/30">
+        {/* ── Footer: clear all + signed-in user ── */}
+        <div className="px-3 py-2.5 border-t border-grid-hairline flex-shrink-0 bg-surface-container/30 flex flex-col gap-2">
+          {sessions.length > 0 && (
             <button
               type="button"
               onClick={onClearHistory}
@@ -179,8 +185,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <Trash2 className="w-3.5 h-3.5" />
               <span>Clear All History</span>
             </button>
-          </div>
-        )}
+          )}
+          {userEmail && (
+            <div className="flex items-center gap-2 px-1">
+              <UserCircle2 className="w-5 h-5 text-text-muted flex-shrink-0" />
+              <span className="text-xs text-text-muted truncate flex-1" title={userEmail}>
+                {userEmail}
+              </span>
+              <button
+                type="button"
+                onClick={onSignOut}
+                title="Sign out"
+                aria-label="Sign out"
+                className="p-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-variant/60 transition-colors"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+        </div>
       </nav>
     </>
   );

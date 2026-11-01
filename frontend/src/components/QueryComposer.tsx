@@ -90,6 +90,7 @@ export const QueryComposer: React.FC<QueryComposerProps> = ({
               ? {
                   ...img,
                   url_or_base64: uploadRes.url,
+                  asset_id: uploadRes.asset_id,
                   previewUrl: uploadRes.preview_base64,
                   name: `${uploadRes.filename} (${fileSizeMB} MB)`,
                 }
@@ -153,9 +154,12 @@ export const QueryComposer: React.FC<QueryComposerProps> = ({
     return null;
   };
 
+  // An image still uploading has no asset yet; sending now would drop it.
+  const isUploading = Object.keys(uploadProgress).length > 0;
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!query.trim() || images.length === 0 || isLoading) return;
+    if (!query.trim() || images.length === 0 || isLoading || isUploading) return;
     
     // Dispatch query to parent
     onExecute(query.trim(), images);
@@ -419,7 +423,8 @@ export const QueryComposer: React.FC<QueryComposerProps> = ({
             {/* Analyze Button */}
             <button
               type="submit"
-              disabled={!query.trim() || images.length === 0 || isLoading}
+              disabled={!query.trim() || images.length === 0 || isLoading || isUploading}
+              title={isUploading ? 'Waiting for the upload to finish' : undefined}
               className="px-5 py-3.5 bg-primary-container text-on-primary-container hover:bg-primary transition-all border-l border-grid-hairline text-xs font-bold uppercase flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer rounded-r-xl shadow-xs"
             >
               <span>{isLoading ? 'Analyzing...' : 'Analyze'}</span>

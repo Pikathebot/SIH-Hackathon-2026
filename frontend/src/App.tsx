@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { ThemeProvider } from './context/ThemeContext';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
+import { useAuth } from './context/AuthContext';
 import { TelemetryBar } from './components/TelemetryBar';
 import { Sidebar } from './components/Sidebar';
 import { ReportCard } from './components/ReportCard';
@@ -8,30 +9,82 @@ import { QueryComposer } from './components/QueryComposer';
 import { ImageLightboxModal } from './components/ImageLightboxModal';
 import { DemoPresetSelector, DemoPreset } from './components/DemoPresetSelector';
 import { submitQuery, isBrowserRenderable } from './services/api';
-import { ChatMessage, AnalysisSession, QueryImage } from './types/contract';
-import { AlertOctagon, Sparkles, Globe2, Eye, Trash2, AlertTriangle, UploadCloud, Layers } from 'lucide-react';
+import {
+  assetPreviewUrl,
+  createSession,
+  deleteSession,
+  fetchHistory,
+  listSessions,
+  renameSession,
+} from './services/sessions';
+import {
+  ChatMessage,
+  AnalysisSession,
+  QueryImage,
+  Modality,
+  SessionDto,
+  HistoryEntry,
+} from './types/contract';
+import { AlertOctagon, Sparkles, Globe2, Eye, Trash2, AlertTriangle, UploadCloud, Layers, Loader2, X } from 'lucide-react';
 
-// ── Initial Clean Session State ──────────────────────────────────────────────
-const INITIAL_SESSION_ID = 'session-1';
-const INITIAL_SESSIONS: AnalysisSession[] = [
-  {
-    id: INITIAL_SESSION_ID,
-    title: 'New Analysis',
-    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' UTC',
-    queryCount: 0,
-    imageCount: 0,
-  },
-];
+// ── Helpers: API DTOs → UI state ─────────────────────────────────────────────
+const DEFAULT_TITLES = new Set(['new analysis']);
 
-const INITIAL_MESSAGES: Record<string, ChatMessage[]> = {
-  [INITIAL_SESSION_ID]: [],
+const formatTime = (iso: string) => {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const sameDay = d.toDateString() === new Date().toDateString();
+  return sameDay
+    ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    : d.toLocaleDateString([], { month: 'short', day: 'numeric' });
 };
+
+const nowLabel = () =>
+  new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' UTC';
+
+const toUiSession = (s: SessionDto): AnalysisSession => ({
+  id: s.id,
+  title: s.title,
+  timestamp: formatTime(s.updated_at),
+  queryCount: s.query_count,
+  imageCount: 0,
+});
+
+const historyToMessages = (entries: HistoryEntry[]): ChatMessage[] =>
+  entries.flatMap((e) => {
+    const images: QueryImage[] = (e.images?.length ? e.images : e.image_asset_ids.map((asset_id) => ({ asset_id })))
+      .map((img: { asset_id: string; modality?: Modality | null; date?: string | null }, i) => ({
+        id: img.asset_id,
+        asset_id: img.asset_id,
+        modality: img.modality || 'optical',
+        date: img.date || undefined,
+        url_or_base64: '',
+        name: `Image #${i + 1}`,
+      }));
+    const user: ChatMessage = {
+      id: `u_${e.id}`, sender: 'user', timestamp: formatTime(e.created_at), query: e.query_text, images,
+    };
+    const reply: ChatMessage = e.response
+      ? { id: `a_${e.id}`, sender: 'assistant', timestamp: formatTime(e.created_at), response: e.response }
+      : {
+          id: `a_${e.id}`, sender: 'assistant', timestamp: formatTime(e.created_at),
+          error: { code: e.error_code || 'INTERNAL_ERROR', message: 'This analysis did not complete.' },
+        };
+    return [user, reply];
+  });
 
 // ── Main workspace ────────────────────────────────────────────────────────────
 const WorkspaceMain: React.FC = () => {
-  const [sessions, setSessions] = useState<AnalysisSession[]>(INITIAL_SESSIONS);
-  const [activeSessionId, setActiveSessionId] = useState<string>(INITIAL_SESSION_ID);
-  const [sessionMessages, setSessionMessages] = useState<Record<string, ChatMessage[]>>(INITIAL_MESSAGES);
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
+  const { sessionId: routeSessionId } = useParams<{ sessionId?: string }>();
+  const activeSessionId = routeSessionId ?? null;
+
+  const [sessions, setSessions] = useState<AnalysisSession[]>([]);
+  const [sessionsLoaded, setSessionsLoaded] = useState(false);
+  const [sessionMessages, setSessionMessages] = useState<Record<string, ChatMessage[]>>({});
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isPresetsOpen, setIsPresetsOpen] = useState(false);
   const [isSidebarOpenMobile, setIsSidebarOpenMobile] = useState(false);
@@ -49,7 +102,8 @@ const WorkspaceMain: React.FC = () => {
   });
 
   const scrollRef = useRef<HTMLDivElement>(null);
-  const activeMessages = sessionMessages[activeSessionId] || [];
+  const requestedHistory = useRef<Set<string>>(new Set());
+  const activeMessages = (activeSessionId && sessionMessages[activeSessionId]) || [];
 
   // Auto-scroll when new messages arrive
   useEffect(() => {
@@ -58,79 +112,144 @@ const WorkspaceMain: React.FC = () => {
     }
   }, [activeMessages, isLoading]);
 
-  // ── Session management ──────────────────────────────────────────────────────
-  const handleSelectSession = (id: string) => {
-    setActiveSessionId(id);
-  };
-
-  const handleNewAnalysis = () => {
-    const newId = `session-${Date.now()}`;
-    const newSession: AnalysisSession = {
-      id: newId,
-      title: 'New Analysis',
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' UTC',
-      queryCount: 0,
-      imageCount: 0,
+  // ── Load the user's sessions once ──────────────────────────────────────────
+  useEffect(() => {
+    let cancelled = false;
+    listSessions()
+      .then((list) => {
+        if (cancelled) return;
+        setSessions(list.map(toUiSession));
+        setSessionsLoaded(true);
+        if (!routeSessionId && list.length > 0) navigate(`/s/${list[0].id}`, { replace: true });
+      })
+      .catch((err) => !cancelled && setLoadError(err?.message || 'Could not load your analyses.'));
+    return () => {
+      cancelled = true;
     };
-    setSessions((prev) => [newSession, ...prev]);
-    setSessionMessages((prev) => ({ ...prev, [newId]: [] }));
-    setActiveSessionId(newId);
-    setComposerState({ query: '', images: [] });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // An unknown or foreign session id in the URL → back to the workspace root
+  useEffect(() => {
+    if (sessionsLoaded && activeSessionId && !sessions.some((s) => s.id === activeSessionId)) {
+      navigate('/', { replace: true });
+    }
+  }, [sessionsLoaded, activeSessionId, sessions, navigate]);
+
+  // Thumbnails for history images come from the authenticated preview endpoint.
+  const hydratePreviews = useCallback((sid: string, messages: ChatMessage[]) => {
+    messages.forEach((m) =>
+      m.images?.forEach((img) => {
+        if (!img.asset_id || img.previewUrl) return;
+        assetPreviewUrl(img.asset_id).then((url) => {
+          if (!url) return;
+          setSessionMessages((prev) => ({
+            ...prev,
+            [sid]: (prev[sid] || []).map((pm) =>
+              pm.id !== m.id
+                ? pm
+                : { ...pm, images: pm.images?.map((pi) => (pi.asset_id === img.asset_id ? { ...pi, previewUrl: url } : pi)) }
+            ),
+          }));
+        });
+      })
+    );
+  }, []);
+
+  // ── Load a session's history the first time it is opened ───────────────────
+  useEffect(() => {
+    const sid = activeSessionId;
+    if (!sid || requestedHistory.current.has(sid) || !sessions.some((s) => s.id === sid)) return;
+    requestedHistory.current.add(sid);
+    setHistoryLoading(true);
+    fetchHistory(sid)
+      .then((entries) => {
+        const messages = historyToMessages(entries);
+        setSessionMessages((prev) => ({ ...prev, [sid]: [...messages, ...(prev[sid] || [])] }));
+        hydratePreviews(sid, messages);
+        const lastTask = [...entries].reverse().find((e) => e.response)?.response?.task;
+        if (lastTask) setSessions((prev) => prev.map((s) => (s.id === sid ? { ...s, previewTask: lastTask } : s)));
+      })
+      .catch((err) => {
+        requestedHistory.current.delete(sid);
+        setLoadError(err?.message || 'Could not load this analysis.');
+      })
+      .finally(() => setHistoryLoading(false));
+  }, [activeSessionId, sessions, hydratePreviews]);
+
+  // ── Session management ──────────────────────────────────────────────────────
+  const openSession = (id: string | null) => navigate(id ? `/s/${id}` : '/');
+
+  const handleSelectSession = (id: string) => {
+    openSession(id);
   };
 
-  const handleDeleteSession = (id: string) => {
-    setSessions((prev) => {
-      const updated = prev.filter((s) => s.id !== id);
-      if (id === activeSessionId) {
-        if (updated.length > 0) {
-          setActiveSessionId(updated[0].id);
-        } else {
-          const newId = `session-${Date.now()}`;
-          const newSession: AnalysisSession = {
-            id: newId,
-            title: 'New Analysis',
-            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' UTC',
-            queryCount: 0,
-            imageCount: 0,
-          };
-          setSessionMessages((msgs) => ({ ...msgs, [newId]: [] }));
-          setActiveSessionId(newId);
-          return [newSession];
-        }
-      }
-      return updated;
-    });
+  const startSession = async (): Promise<string> => {
+    const created = await createSession();
+    requestedHistory.current.add(created.id); // brand new: nothing to fetch
+    setSessions((prev) => [toUiSession(created), ...prev]);
+    setSessionMessages((prev) => ({ ...prev, [created.id]: [] }));
+    openSession(created.id);
+    return created.id;
+  };
+
+  const handleNewAnalysis = async () => {
+    try {
+      await startSession();
+      setComposerState({ query: '', images: [] });
+    } catch (err: any) {
+      setLoadError(err?.message || 'Could not start a new analysis.');
+    }
+  };
+
+  const handleDeleteSession = async (id: string) => {
+    try {
+      await deleteSession(id);
+    } catch (err: any) {
+      setLoadError(err?.message || 'Could not delete this analysis.');
+      return;
+    }
+    const remaining = sessions.filter((s) => s.id !== id);
+    setSessions(remaining);
     setSessionMessages((prev) => {
       const updated = { ...prev };
       delete updated[id];
       return updated;
     });
+    if (id === activeSessionId) openSession(remaining[0]?.id ?? null);
   };
 
-  const handleConfirmClearAll = () => {
-    const newId = `session-${Date.now()}`;
-    const fresh: AnalysisSession = {
-      id: newId,
-      title: 'New Analysis',
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' UTC',
-      queryCount: 0,
-      imageCount: 0,
-    };
-    setSessions([fresh]);
-    setSessionMessages({ [newId]: [] });
-    setActiveSessionId(newId);
-    setComposerState({ query: '', images: [] });
+  const handleConfirmClearAll = async () => {
     setShowClearConfirmModal(false);
+    const results = await Promise.allSettled(sessions.map((s) => deleteSession(s.id)));
+    const failed = sessions.filter((_, i) => results[i].status === 'rejected');
+    setSessions(failed);
+    setSessionMessages({});
+    requestedHistory.current.clear();
+    setComposerState({ query: '', images: [] });
+    if (failed.length) setLoadError(`${failed.length} analyses could not be deleted.`);
+    openSession(failed[0]?.id ?? null);
   };
 
   const handleSelectPreset = (preset: DemoPreset) => {
     setComposerState({ query: preset.query, images: preset.images });
   };
 
+  const handleSignOut = async () => {
+    await logout();
+    navigate('/login', { replace: true });
+  };
+
   // ── Query submission ────────────────────────────────────────────────────────
   const handleExecute = async (queryText: string, attachedImages: QueryImage[]) => {
-    const timestamp =
-      new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' UTC';
+    let sid = activeSessionId;
+    try {
+      if (!sid) sid = await startSession();
+    } catch (err: any) {
+      setLoadError(err?.message || 'Could not start a new analysis.');
+      return;
+    }
+    const sessionKey = sid;
 
     // Free massive multi-megabyte raw TIFF data from persistent React chat history state.
     // Chat history only requires lightweight web-displayable preview thumbnails (~80 KB PNGs).
@@ -146,54 +265,56 @@ const WorkspaceMain: React.FC = () => {
     const userMsg: ChatMessage = {
       id: `usr_${Date.now()}`,
       sender: 'user',
-      timestamp,
+      timestamp: nowLabel(),
       query: queryText,
       images: displayImages,
     };
 
     setSessionMessages((prev) => ({
       ...prev,
-      [activeSessionId]: [...(prev[activeSessionId] || []), userMsg],
+      [sessionKey]: [...(prev[sessionKey] || []), userMsg],
     }));
 
-    setSessions((prev) =>
-      prev.map((s) =>
-        s.id === activeSessionId
-          ? {
-              ...s,
-              title: queryText.slice(0, 36) + (queryText.length > 36 ? '…' : ''),
-              queryCount: s.queryCount + 1,
-              imageCount: Math.max(s.imageCount, attachedImages.length),
-            }
-          : s
-      )
-    );
+    // First question in an untitled session names it (saved on the server too).
+    const current = sessions.find((s) => s.id === sessionKey);
+    const newTitle = queryText.slice(0, 60) + (queryText.length > 60 ? '…' : '');
+    if (!current || (current.queryCount === 0 && DEFAULT_TITLES.has(current.title.toLowerCase()))) {
+      renameSession(sessionKey, newTitle).catch(() => undefined);
+      setSessions((prev) => prev.map((s) => (s.id === sessionKey ? { ...s, title: newTitle } : s)));
+    }
 
     setIsLoading(true);
 
     try {
-      const response = await submitQuery({ query: queryText, images: attachedImages });
+      const response = await submitQuery({ query: queryText, images: attachedImages, session_id: sessionKey });
 
       const assistantMsg: ChatMessage = {
         id: `asst_${Date.now()}`,
         sender: 'assistant',
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' UTC',
+        timestamp: nowLabel(),
         response,
       };
 
       setSessionMessages((prev) => ({
         ...prev,
-        [activeSessionId]: [...(prev[activeSessionId] || []), assistantMsg],
+        [sessionKey]: [...(prev[sessionKey] || []), assistantMsg],
       }));
 
-      setSessions((prev) =>
-        prev.map((s) => (s.id === activeSessionId ? { ...s, previewTask: response.task } : s))
-      );
+      // Saved on the server: bump the count and move the session to the top.
+      setSessions((prev) => {
+        const updated = prev.map((s) =>
+          s.id === sessionKey
+            ? { ...s, previewTask: response.task, queryCount: s.queryCount + 1, timestamp: formatTime(new Date().toISOString()) }
+            : s
+        );
+        const idx = updated.findIndex((s) => s.id === sessionKey);
+        return idx > 0 ? [updated[idx], ...updated.slice(0, idx), ...updated.slice(idx + 1)] : updated;
+      });
     } catch (err: any) {
       const errorMsg: ChatMessage = {
         id: `err_${Date.now()}`,
         sender: 'assistant',
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' UTC',
+        timestamp: nowLabel(),
         error: {
           code: err.code || 'MODEL_INFERENCE_FAILED',
           message:
@@ -204,7 +325,7 @@ const WorkspaceMain: React.FC = () => {
 
       setSessionMessages((prev) => ({
         ...prev,
-        [activeSessionId]: [...(prev[activeSessionId] || []), errorMsg],
+        [sessionKey]: [...(prev[sessionKey] || []), errorMsg],
       }));
     } finally {
       setIsLoading(false);
@@ -224,6 +345,8 @@ const WorkspaceMain: React.FC = () => {
         onClearHistory={() => setShowClearConfirmModal(true)}
         isOpenMobile={isSidebarOpenMobile}
         onCloseMobile={() => setIsSidebarOpenMobile(false)}
+        userEmail={user?.email}
+        onSignOut={handleSignOut}
       />
 
       {/* Main content area */}
@@ -239,8 +362,25 @@ const WorkspaceMain: React.FC = () => {
           ref={scrollRef}
           className="flex-1 overflow-y-auto pt-[52px] pb-[130px] px-4 md:px-8 flex flex-col gap-5 scroll-smooth"
         >
+          {loadError && (
+            <div role="alert" className="w-full max-w-4xl mx-auto bg-red-delta/10 border border-red-delta/40 px-4 py-3 rounded-2xl flex items-start gap-3 text-sm">
+              <AlertOctagon className="w-4 h-4 text-red-delta flex-shrink-0 mt-0.5" />
+              <p className="flex-1 text-text-primary">{loadError}</p>
+              <button type="button" onClick={() => setLoadError(null)} aria-label="Dismiss" className="text-text-muted hover:text-text-primary">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+
+          {historyLoading && activeMessages.length === 0 && (
+            <div className="my-auto flex items-center justify-center gap-2 text-text-muted text-sm">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              <span>Loading analysis…</span>
+            </div>
+          )}
+
           {/* Clean Initial Empty State */}
-          {activeMessages.length === 0 && (
+          {activeMessages.length === 0 && !historyLoading && (
             <div className="max-w-xl mx-auto my-auto flex flex-col items-center text-center gap-5 py-16 animate-in fade-in duration-300">
               <div className="p-4 bg-surface-panel border border-grid-hairline rounded-2xl shadow-md">
                 <Globe2 className="w-10 h-10 text-primary" />
@@ -486,10 +626,6 @@ const WorkspaceMain: React.FC = () => {
 };
 
 // ── Root ──────────────────────────────────────────────────────────────────────
-export const App: React.FC = () => (
-  <ThemeProvider>
-    <WorkspaceMain />
-  </ThemeProvider>
-);
+export const App: React.FC = () => <WorkspaceMain />;
 
 export default App;

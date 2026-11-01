@@ -1,6 +1,5 @@
-import { QueryRequest, QueryResponse, ApiError, HealthResponse } from '../types/contract';
-
-const BASE_URL = (import.meta as any).env?.VITE_API_URL || '';
+import { QueryRequest, QueryResponse, HealthResponse } from '../types/contract';
+import { apiFetch, ApiRequestError, BASE_URL, getAccessToken, refreshAccessToken, toApiError } from './http';
 
 /**
  * Submit a natural-language query with 1-2 satellite images.
@@ -13,46 +12,27 @@ export async function submitQuery(
   request: QueryRequest,
   signal?: AbortSignal
 ): Promise<QueryResponse> {
-  const endpoint = `${BASE_URL}/api/v1/query`;
-
   const payload = {
     query: request.query,
+    session_id: request.session_id,
     images: request.images.map((img) => ({
       id: img.id,
       modality: img.modality,
       date: img.date || undefined,
-      url_or_base64: img.url_or_base64,
+      // v2: uploaded files are referenced by asset_id; everything else is sent inline
+      ...(img.asset_id ? { asset_id: img.asset_id } : { url_or_base64: img.url_or_base64 }),
     })),
   };
 
   try {
-    const response = await fetch(endpoint, {
+    const response = await apiFetch('/api/v1/query', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
       signal,
     });
-
-    let data: any;
-    try {
-      data = await response.json();
-    } catch {
-      throw new Error(`Server returned HTTP ${response.status} with an unparseable response.`);
-    }
-
-    if (!response.ok) {
-      const apiError = data as ApiError;
-      const errorObj = new Error(
-        apiError.error?.message || `Request failed with HTTP status ${response.status}`
-      );
-      (errorObj as any).code = apiError.error?.code || 'INTERNAL_ERROR';
-      (errorObj as any).detail = apiError.error?.detail;
-      throw errorObj;
-    }
-
-    return data as QueryResponse;
+    if (!response.ok) throw await toApiError(response);
+    return (await response.json()) as QueryResponse;
   } catch (err: any) {
     if (err.name === 'AbortError') {
       const abortErr = new Error('Analysis query timed out or was cancelled.');
@@ -111,16 +91,13 @@ export interface PreviewResult {
  * Generate a web-friendly PNG preview for any satellite image or GeoTIFF.
  */
 export async function generatePreview(urlOrBase64: string): Promise<PreviewResult> {
-  const endpoint = `${BASE_URL}/api/v1/preview`;
-  const response = await fetch(endpoint, {
+  const response = await apiFetch('/api/v1/preview', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ url_or_base64: urlOrBase64 }),
   });
 
-  if (!response.ok) {
-    throw new Error(`Preview generation failed with status ${response.status}`);
-  }
+  if (!response.ok) throw await toApiError(response);
 
   return (await response.json()) as PreviewResult;
 }
@@ -175,10 +152,24 @@ export interface UploadResult {
  * Stream large satellite imagery (>150MB to multi-GB GeoTIFFs) directly to server disk cache.
  * Tracks upload percentage via XMLHttpRequest and returns lightweight browser preview.
  */
-export function uploadLargeImage(
+export async function uploadLargeImage(
   file: File,
   onProgress?: (percent: number) => void
 ): Promise<UploadResult> {
+  // XHR (not fetch) for upload progress; it needs the token added by hand and a
+  // single refresh-and-retry if the access token expired.
+  if (!getAccessToken()) await refreshAccessToken();
+  try {
+    return await uploadOnce(file, onProgress);
+  } catch (err) {
+    if (err instanceof ApiRequestError && err.status === 401 && (await refreshAccessToken())) {
+      return uploadOnce(file, onProgress);
+    }
+    throw err;
+  }
+}
+
+function uploadOnce(file: File, onProgress?: (percent: number) => void): Promise<UploadResult> {
   return new Promise((resolve, reject) => {
     const endpoint = `${BASE_URL}/api/v1/upload`;
     const formData = new FormData();
@@ -186,6 +177,9 @@ export function uploadLargeImage(
 
     const xhr = new XMLHttpRequest();
     xhr.open('POST', endpoint);
+    xhr.withCredentials = true;
+    const token = getAccessToken();
+    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
 
     if (xhr.upload && onProgress) {
       xhr.upload.onprogress = (event) => {
@@ -205,12 +199,17 @@ export function uploadLargeImage(
           reject(new Error('Failed to parse upload response.'));
         }
       } else {
+        let err: any = null;
         try {
-          const err = JSON.parse(xhr.responseText);
-          reject(new Error(err.error?.message || `Upload failed with status ${xhr.status}`));
+          err = JSON.parse(xhr.responseText);
         } catch {
-          reject(new Error(`Upload failed with status ${xhr.status}`));
+          /* non-JSON */
         }
+        reject(new ApiRequestError(
+          xhr.status,
+          err?.error?.code || 'INTERNAL_ERROR',
+          err?.error?.message || `Upload failed with status ${xhr.status}`,
+        ));
       }
     };
 
