@@ -17,6 +17,7 @@ from app.errors import ApiError
 from app.models.api import (
     ExecutionSummary,
     HistoryEntry,
+    HistoryImage,
     QueryResponse,
     SessionCreate,
     SessionOut,
@@ -54,16 +55,29 @@ def _evidence_path(ref: str | None):
     return path if DATA_DIR.resolve() in path.parents else None
 
 
+def _read_evidence(q: QueryRecord) -> tuple[VisualEvidence, list[HistoryImage]]:
+    """Evidence file: {"visual_evidence", "images"} (v2.2.0) or a bare visual_evidence (older)."""
+    asset_ids = json.loads(q.image_ids or "[]")
+    evidence = VisualEvidence(type=q.visual_evidence_type)
+    images = [HistoryImage(asset_id=a) for a in asset_ids]
+    path = _evidence_path(q.visual_evidence_ref)
+    if path and path.is_file():
+        try:
+            doc = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(doc, dict) and "visual_evidence" in doc:
+                evidence = VisualEvidence.model_validate(doc["visual_evidence"])
+                images = [HistoryImage.model_validate(i) for i in doc.get("images") or []] or images
+            else:
+                evidence = VisualEvidence.model_validate(doc)
+        except Exception:
+            logger.warning("Unreadable evidence file for query %s", q.id)
+    return evidence, images
+
+
 def _history_entry(q: QueryRecord) -> HistoryEntry:
     response = None
+    evidence, images = _read_evidence(q)
     if q.status == "success":
-        evidence = VisualEvidence(type=q.visual_evidence_type)
-        path = _evidence_path(q.visual_evidence_ref)
-        if path and path.is_file():
-            try:
-                evidence = VisualEvidence.model_validate_json(path.read_text(encoding="utf-8"))
-            except Exception:
-                logger.warning("Unreadable evidence file for query %s", q.id)
         response = QueryResponse(
             answer=q.answer or "",
             confidence=q.confidence,
@@ -76,8 +90,8 @@ def _history_entry(q: QueryRecord) -> HistoryEntry:
             ),
         )
     return HistoryEntry(id=q.id, query_text=q.query_text, created_at=q.created_at, status=q.status,
-                        error_code=q.error_code, image_asset_ids=json.loads(q.image_ids or "[]"),
-                        response=response)
+                        error_code=q.error_code, image_asset_ids=[i.asset_id for i in images],
+                        images=images, response=response)
 
 
 @router.get("", response_model=list[SessionOut])

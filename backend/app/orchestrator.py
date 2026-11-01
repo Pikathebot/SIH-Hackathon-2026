@@ -551,7 +551,12 @@ async def _persist_query(
     ev_dir = EVIDENCE_DIR / user_id
     ev_dir.mkdir(parents=True, exist_ok=True)
     ev_path = ev_dir / f"{query_id}.json"
-    await asyncio.to_thread(ev_path.write_text, response.visual_evidence.model_dump_json(), "utf-8")
+    evidence_doc = {
+        "visual_evidence": response.visual_evidence.model_dump(mode="json"),
+        "images": [{"asset_id": iid, "modality": inp.modality, "date": inp.date}
+                   for iid, inp in zip(image_ids, request.images)],
+    }
+    await asyncio.to_thread(ev_path.write_text, json.dumps(evidence_doc), "utf-8")
 
     es = response.execution_summary
     db.add(QueryRecord(

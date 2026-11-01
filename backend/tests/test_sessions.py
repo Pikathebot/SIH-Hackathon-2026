@@ -92,6 +92,7 @@ def test_upload_query_by_asset_and_history_round_trip(authed_client):
     history = c.get(f"/api/v1/sessions/{sid}/queries").json()
     assert [h["query_text"] for h in history] == ["What is in this image?", "Highlight the water bodies in this image."]
     assert history[0]["image_asset_ids"] == [asset["asset_id"]]
+    assert history[0]["images"] == [{"asset_id": asset["asset_id"], "modality": "optical", "date": None}]
     assert history[0]["response"] == answer  # re-renders exactly what was returned
     assert history[1]["response"]["visual_evidence"] == res2.json()["visual_evidence"]
     assert c.get(f"/api/v1/sessions/{sid}").json()["query_count"] == 2
@@ -211,3 +212,15 @@ def test_asset_preview_is_png_for_owner_only(two_users):
     assert max(Image.open(io.BytesIO(res.content)).size) <= 1024
     assert a.get(f"/api/v1/assets/{asset['asset_id']}/preview").content == res.content  # cached
     assert b.get(f"/api/v1/assets/{asset['asset_id']}/preview").status_code == 404
+
+
+def test_history_keeps_modality_and_dates_per_query(authed_client):
+    c = authed_client
+    sid = c.post("/api/v1/sessions").json()["id"]
+    imgs = [{"id": "a", "modality": "optical", "date": "2021-01-01", "url_or_base64": _png_b64()},
+            {"id": "b", "modality": "optical", "date": "2024-01-01", "url_or_base64": _png_b64()}]
+    res = c.post("/api/v1/query", json={"query": "What changed between these two dates?", "session_id": sid, "images": imgs})
+    assert res.status_code == 200, res.text
+    (entry,) = c.get(f"/api/v1/sessions/{sid}/queries").json()
+    assert [(i["modality"], i["date"]) for i in entry["images"]] == [("optical", "2021-01-01"), ("optical", "2024-01-01")]
+    assert entry["image_asset_ids"] == [i["asset_id"] for i in entry["images"]]

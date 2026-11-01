@@ -152,6 +152,12 @@ class SessionOut(BaseModel):
     query_count: int = 0
 
 
+class HistoryImage(BaseModel):
+    asset_id: str
+    modality: Optional[str] = None
+    date: Optional[str] = None
+
+
 class HistoryEntry(BaseModel):
     id: str
     query_text: str
@@ -159,4 +165,5 @@ class HistoryEntry(BaseModel):
     status: str
     error_code: Optional[str] = None
     image_asset_ids: list[str]
+    images: list[HistoryImage] = []  # v2.2.0
     response: Optional[QueryResponse] = None
