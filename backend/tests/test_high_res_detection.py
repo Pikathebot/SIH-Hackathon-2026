@@ -76,6 +76,6 @@ def test_high_res_tiled_detection_query():
 
     # 5. Verify execution summary confirms tiled execution
     assert data["execution_summary"]["selected_task"] == "detection"
-    assert data["execution_summary"]["tool_used"] in ("rsunivlm_vg", "rsunivlm_seg")
+    assert data["execution_summary"]["tool_used"] in ("rsunivlm_vg", "rsunivlm_seg", "qwen_vl_vg", "qwen_vl_seg")
     assert "tiling" in data["execution_summary"]["parameters"]
     assert data["execution_summary"]["parameters"]["tiling"]["total_chips"] > 1

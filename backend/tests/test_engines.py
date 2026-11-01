@@ -80,3 +80,40 @@ def test_llm_intent_disabled_in_mock_mode(monkeypatch):
     e.classify_intent = lambda q, m: "captioning"
     monkeypatch.setattr(orchestrator, "ENGINE", e)
     assert asyncio.run(orchestrator._maybe_llm_intent(_req("What is here?"), "vqa")) == "vqa"
+
+
+# ── real-mode startup fallback when llama-server is down ──────────────────
+def _patch_real_loaders(monkeypatch, reachable):
+    from ai_service.fusion.mock import run_fusion
+    from ai_service.qwen_vl import mock as qwen_mock
+    from ai_service.rsunivlm import mock as rs_mock
+    from app import engines
+
+    monkeypatch.setattr(engines, "_load_rsunivlm", lambda mode: rs_mock)
+    monkeypatch.setattr(engines, "_load_qwen", lambda mode: qwen_mock)
+    monkeypatch.setattr(engines, "_load_fusion", lambda mode: run_fusion)
+    monkeypatch.setattr(engines, "_vlm_server_reachable", lambda: (reachable, "http://127.0.0.1:8080"))
+    return engines
+
+
+@pytest.mark.parametrize("requested", ["qwen", "hybrid"])
+def test_real_mode_falls_back_to_rsunivlm_when_vlm_down(monkeypatch, requested):
+    engines = _patch_real_loaders(monkeypatch, reachable=False)
+    e = engines.build_engine(requested, "real")
+    assert e.name == "rsunivlm"
+    assert any("not reachable" in n for n in e.notes)
+
+
+def test_real_mode_keeps_hybrid_when_vlm_up(monkeypatch):
+    engines = _patch_real_loaders(monkeypatch, reachable=True)
+    e = engines.build_engine("hybrid", "real")
+    assert e.name == "hybrid" and e.notes == []
+
+
+def test_default_engine_is_hybrid():
+    from app import config
+    import os
+
+    if "AI_ENGINE" not in os.environ:
+        assert config.AI_ENGINE == "hybrid"
+    assert build_engine("", "mock").name == "hybrid"

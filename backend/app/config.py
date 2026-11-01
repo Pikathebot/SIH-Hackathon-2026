@@ -61,7 +61,9 @@ DATABASE_PATH: str = str(_resolve(os.getenv("DATABASE_PATH", str(DATA_DIR / "sat
 # ---------------------------------------------------------------------------
 # Engine selection (see app/engines.py)
 # ---------------------------------------------------------------------------
-AI_ENGINE: str = os.getenv("AI_ENGINE", "rsunivlm")
+# hybrid = Qwen3-VL (llama-server) for language/grounding + RSUniVLM for masks.
+# Falls back to rsunivlm at startup if llama-server is not reachable (real mode).
+AI_ENGINE: str = os.getenv("AI_ENGINE", "hybrid")
 # Use the VLM to classify single-image intent (qwen/hybrid engines, real mode);
 # the keyword classifier remains the fallback.
 LLM_INTENT_ENABLED: bool = os.getenv("LLM_INTENT_ENABLED", "true").lower() in ("1", "true", "yes")

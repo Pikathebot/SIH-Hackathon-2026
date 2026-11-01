@@ -90,7 +90,7 @@ class TestQueryValid:
         # Execution summary — always present (CONTRACT.md §7)
         es = data["execution_summary"]
         assert es["selected_task"] == "vqa"
-        assert es["tool_used"] == "rsunivlm_vqa"
+        assert es["tool_used"] in ("rsunivlm_vqa", "qwen_vl_vqa")  # depends on AI_ENGINE
         assert isinstance(es["parameters"], dict)
         assert es["inputs_validated"] is True
         assert isinstance(es["latency_ms"], int)

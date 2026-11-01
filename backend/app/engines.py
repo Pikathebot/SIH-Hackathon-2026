@@ -5,12 +5,17 @@ Two orthogonal switches (env vars, see config.py):
   AI_ENGINE        rsunivlm | qwen | hybrid     which model family
   AI_SERVICE_MODE  mock | real                  contract mock vs real inference
 
-  rsunivlm  all RS tasks via RSUniVLM (original behaviour, the default)
+  rsunivlm  all RS tasks via RSUniVLM (original behaviour)
   qwen      VQA / captioning / grounding / change text via Qwen-VL (llama-server);
             mask-mode detection via spectral extractors or rasterised boxes
-  hybrid    Qwen-VL for VQA, captioning, bbox grounding and change text;
-            RSUniVLM [SEG] for mask-mode detection when its weights are
-            importable, otherwise falls back to the Qwen engine's mask path
+  hybrid    (the default) Qwen-VL for VQA, captioning, bbox grounding and change
+            text; RSUniVLM [SEG] for mask-mode detection when its weights are
+            importable, otherwise falls back to the Qwen engine's mask path.
+            Chosen by side-by-side evaluation on sample_data (2026-11-01).
+
+In real mode, qwen/hybrid need llama-server to be reachable when the engine is
+built; if it is not, the engine falls back to rsunivlm and records why in
+`Engine.notes` (surfaced by /health) instead of failing every request.
 
 Fusion (optical+SAR) always uses ai_service/fusion regardless of engine.
 """
@@ -76,18 +81,39 @@ def _hybrid_detection(qwen_mod, rs_mod):
     return run_detection
 
 
+def _vlm_server_reachable() -> tuple[bool, str]:
+    try:
+        from ai_service.qwen_vl.client import get_client
+
+        c = get_client()
+        return c.is_available(), c.base_url
+    except Exception as exc:
+        return False, str(exc)
+
+
 def build_engine(engine_name: str, mode: str) -> Engine:
-    engine_name = (engine_name or "rsunivlm").lower()
+    engine_name = (engine_name or "hybrid").lower()
     if engine_name not in VALID_ENGINES:
         logger.warning("Unknown AI_ENGINE=%r, falling back to 'rsunivlm'", engine_name)
         engine_name = "rsunivlm"
     mode = "real" if mode == "real" else "mock"
     run_fusion = _load_fusion(mode)
 
+    notes: list[str] = []
+    if engine_name in ("qwen", "hybrid") and mode == "real":
+        ok, where = _vlm_server_reachable()
+        if not ok:
+            notes.append(
+                f"AI_ENGINE={engine_name} requested but the VLM server ({where}) is not reachable; "
+                "using rsunivlm. Start it with scripts/start_vlm_server.ps1 and restart the backend."
+            )
+            logger.warning(notes[-1])
+            engine_name = "rsunivlm"
+
     if engine_name == "rsunivlm":
         m = _load_rsunivlm(mode)
         return Engine(engine_name, mode, m.run_vqa, m.run_captioning, m.run_detection,
-                      m.run_change_detection, run_fusion)
+                      m.run_change_detection, run_fusion, notes=notes)
 
     q = _load_qwen(mode)
     if engine_name == "qwen":
@@ -95,7 +121,6 @@ def build_engine(engine_name: str, mode: str) -> Engine:
                       q.run_change_detection, run_fusion, classify_intent=q.classify_intent)
 
     # hybrid
-    notes: list[str] = []
     try:
         rs = _load_rsunivlm(mode)
     except Exception as exc:  # torch / weights missing → degrade gracefully
