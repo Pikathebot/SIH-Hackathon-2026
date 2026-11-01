@@ -120,3 +120,26 @@ async def get_asset(asset_id: str, user: CurrentUser, db: DbSession) -> FileResp
     """The original uploaded file, for its owner only."""
     row, path = await resolve_owned_asset(db, user.id, asset_id)
     return FileResponse(path=str(path), filename=row.filename or path.name)
+
+
+def _ensure_preview_png(src, dst) -> None:
+    if dst.exists() and dst.stat().st_mtime >= src.stat().st_mtime:
+        return
+    pil_img, _ = process_geotiff(src, max_dim=1024)
+    tmp = dst.with_suffix(".tmp")
+    pil_img.convert("RGB").save(tmp, format="PNG")
+    tmp.replace(dst)  # atomic, so concurrent requests never serve a half-written file
+
+
+@router.get("/assets/{asset_id}/preview", responses={404: {"model": ErrorResponse}})
+async def get_asset_preview(asset_id: str, user: CurrentUser, db: DbSession) -> FileResponse:
+    """Browser-renderable PNG preview (≤1024 px) of an owned asset (API_CONTRACT v2.1.0). Cached on disk."""
+    _, path = await resolve_owned_asset(db, user.id, asset_id)
+    preview = path.with_name(f"{path.stem}.preview.png")
+    try:
+        await asyncio.to_thread(_ensure_preview_png, path, preview)
+    except Exception as exc:
+        logger.warning("Could not render preview for asset %s: %s", asset_id, exc)
+        raise ApiError(404, "NOT_FOUND", "No preview available for this image.") from exc
+    return FileResponse(path=str(preview), media_type="image/png",
+                        headers={"Cache-Control": "private, max-age=86400"})

@@ -191,3 +191,23 @@ def test_local_file_paths_are_refused(authed_client):
         res = authed_client.post("/api/v1/query", json={"query": "Describe this scene.",
                                                         "images": [{"id": "i", "modality": "optical", "url_or_base64": source}]})
         assert res.status_code == 400, source
+
+
+# ── Asset previews (API v2.1.0) ──────────────────────────────────────────
+def test_asset_preview_is_png_for_owner_only(two_users):
+    import rasterio
+    from rasterio.transform import from_bounds
+    import numpy as np
+
+    a, b = two_users
+    buf = io.BytesIO()
+    with rasterio.open(buf, "w", driver="GTiff", height=1500, width=2000, count=3, dtype="uint16",
+                       crs="EPSG:4326", transform=from_bounds(77, 28, 77.2, 28.2, 2000, 1500)) as dst:
+        dst.write(np.random.randint(0, 4000, (3, 1500, 2000), dtype=np.uint16))
+    asset = _upload(a, buf.getvalue(), "scene.tif")
+
+    res = a.get(f"/api/v1/assets/{asset['asset_id']}/preview")
+    assert res.status_code == 200 and res.headers["content-type"] == "image/png"
+    assert max(Image.open(io.BytesIO(res.content)).size) <= 1024
+    assert a.get(f"/api/v1/assets/{asset['asset_id']}/preview").content == res.content  # cached
+    assert b.get(f"/api/v1/assets/{asset['asset_id']}/preview").status_code == 404
