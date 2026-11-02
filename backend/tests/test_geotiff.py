@@ -147,6 +147,23 @@ class TestCoordinateProjection:
             assert 50.0 <= pt[1] <= 50.1
 
 
+    def test_box_space_scales_downsampled_boxes_to_raw(self):
+        """Boxes on a 2048-px decode of a 4096-px raster map to the same ground as raw boxes."""
+        geo_meta = GeoMetadata(
+            crs="EPSG:4326",
+            image_bounds=[10.0, 50.0, 10.4096, 50.4096],
+            affine_transform=(0.0001, 0.0, 10.0, 0.0, -0.0001, 50.4096),
+            raw_size=(4096, 4096),
+            scaled_size=(2048, 2048),
+            scale_factor=(2.0, 2.0),
+        )
+        decoded = pixel_boxes_to_geo_polygons([[100, 200, 300, 400]], geo_meta, box_space=(2048, 2048))
+        raw = pixel_boxes_to_geo_polygons([[200, 400, 600, 800]], geo_meta, box_space=(4096, 4096))
+        assert decoded == raw
+        # Tiled results are already in raw pixels: no extra decode scaling
+        assert raw[0][0] == pytest.approx([10.02, 50.4096 - 0.04], abs=1e-3)
+
+
 class TestDynamicBandResolution:
     """Tests for metadata-aware band selection tiers in process_geotiff."""
 

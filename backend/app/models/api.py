@@ -48,6 +48,7 @@ class VisualEvidence(BaseModel):
     """Visual evidence block in query response."""
     type: str                                       # "none" | "bbox" | "mask"
     boxes: Optional[list[list[int]]] = None         # [[x1,y1,x2,y2], ...]
+    image_size: Optional[list[int]] = None          # v2.4.0: [width, height] of the pixel grid `boxes` are in
     mask_base64: Optional[str] = None
     overlay_base64: Optional[str] = None
     geospatial: Optional[GeospatialMetadata] = None

@@ -120,7 +120,7 @@ class TestQueryValid:
     async def test_detection_bbox(self, client):
         """Detection: query with 'find' → detection with bbox."""
         payload = {
-            "query": "Find the water body in this image.",
+            "query": "Locate the aircraft in this image.",
             "images": [
                 {
                     "id": "img1",
@@ -135,8 +135,11 @@ class TestQueryValid:
         data = response.json()
         assert data["task"] == "detection"
         ve = data["visual_evidence"]
-        assert ve["type"] in ("bbox", "mask")
+        assert ve["type"] == "bbox" and ve["boxes"]
         assert "execution_summary" in data
+        # v2.4.0: the pixel grid the boxes are in, so clients can draw them on any preview size
+        w, h = ve["image_size"]
+        assert all(0 <= b[0] <= b[2] <= w and 0 <= b[1] <= b[3] <= h for b in ve["boxes"])
 
     @pytest.mark.asyncio
     async def test_detection_mask(self, client):

@@ -16,7 +16,7 @@ import io
 import logging
 from pathlib import Path
 import re
-from typing import Generator, List, Optional, Tuple, Union
+from typing import Generator, List, Optional, Sequence, Tuple, Union
 import numpy as np
 from PIL import Image
 
@@ -485,6 +485,7 @@ def process_geotiff(
 def pixel_boxes_to_geo_polygons(
     pixel_boxes: List[List[int]],
     geo_meta: GeoMetadata,
+    box_space: Optional[Sequence[int]] = None,
 ) -> List[List[List[float]]]:
     """
     Projects 2D pixel bounding boxes [[x1, y1, x2, y2], ...] into
@@ -515,9 +516,12 @@ def pixel_boxes_to_geo_polygons(
     polygons = []
 
     raw_w, raw_h = geo_meta.raw_size
-    # Determine if input boxes are in [0, 1000] normalized space
+    if box_space and box_space[0] > 0 and box_space[1] > 0:
+        # The caller states the pixel grid the boxes are in: scale that grid to the raw raster
+        sx, sy = raw_w / box_space[0], raw_h / box_space[1]
+    # Determine if input boxes are in [0, 1000] normalized space (legacy guess when box_space is unknown)
     is_normalized_1000 = False
-    if pixel_boxes:
+    if pixel_boxes and not box_space:
         max_coord = max(max(b[:4]) for b in pixel_boxes if len(b) >= 4)
         if max_coord <= 1000 and max(raw_w, raw_h) > 1000:
             is_normalized_1000 = True

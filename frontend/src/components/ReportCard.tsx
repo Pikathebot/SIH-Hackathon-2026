@@ -219,6 +219,7 @@ export const ReportCard: React.FC<ReportCardProps> = ({
           <div className="flex flex-col gap-3">
             <CoordinateTickFrame
               imageUrl={safePrimaryUrl}
+              visualEvidence={response.visual_evidence}
               modality={primaryImage?.modality}
               date={primaryImage?.date}
               caption={primaryImage?.name || 'Input Imagery'}

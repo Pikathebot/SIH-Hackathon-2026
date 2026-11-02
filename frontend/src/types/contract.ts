@@ -39,6 +39,7 @@ export interface GeospatialMetadata {
 export interface VisualEvidence {
   type: VisualEvidenceType;
   boxes?: [number, number, number, number][] | null;
+  image_size?: [number, number] | null; // v2.4.0: [width, height] of the pixel grid `boxes` are in
   mask_base64?: string | null;
   overlay_base64?: string | null;
   geospatial?: GeospatialMetadata | null;

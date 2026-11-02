@@ -388,14 +388,20 @@ def _dispatch_ai_sync(
 
         if resolved_mode == "bbox" and file_src and geo_meta and max(geo_meta.raw_size) > 1024:
             logger.info("Routing localized bbox detection through high-resolution tiled engine for %s", file_src)
-            return run_tiled_detection(
+            result = run_tiled_detection(
                 raster_source=file_src,
                 query=request.query,
                 detection_fn=_run_detection,
                 chip_size=1024,
                 overlap_ratio=0.15,
             )
-        return _run_detection(primary_img, request.query)
+            # Tiled boxes are in full-scene (raw raster) pixels
+            result["image_size"] = list(geo_meta.raw_size)
+            return result
+        result = _run_detection(primary_img, request.query)
+        # Engine boxes are in the pixels of the image they were given
+        result["image_size"] = list(primary_img.size)
+        return result
 
     elif task == "change_detection":
         # Sort by date so earlier image = before, later = after
@@ -451,7 +457,9 @@ def _assemble_response(
     geospatial = None
     if geo_meta and geo_meta.image_bounds:
         boxes = result.get("boxes")
-        geo_boxes = pixel_boxes_to_geo_polygons(boxes, geo_meta) if boxes else None
+        geo_boxes = (
+            pixel_boxes_to_geo_polygons(boxes, geo_meta, box_space=result.get("image_size")) if boxes else None
+        )
 
         all_geo = [{"crs": geo_meta.crs, "bounds": geo_meta.image_bounds}]
         sec_bounds = None
@@ -499,6 +507,7 @@ def _assemble_response(
             visual_evidence=VisualEvidence(
                 type=ve_type,
                 boxes=result.get("boxes"),
+                image_size=result.get("image_size") if result.get("boxes") else None,
                 mask_base64=result.get("mask_base64"),
                 overlay_base64=result.get("overlay_base64"),
                 geospatial=geospatial,
