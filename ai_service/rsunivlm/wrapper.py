@@ -14,7 +14,6 @@ from ai_service.common.types import (
     CaptioningResult,
     DetectionResult,
     ChangeResult,
-    ExecutionMeta,
 )
 from ai_service.common.errors import AIServiceError, MODEL_INFERENCE_FAILED
 from ai_service.rsunivlm.inference import (
@@ -25,7 +24,6 @@ from ai_service.rsunivlm.inference import (
     create_overlay_image,
     extract_water_spectral_mask,
     extract_coastline_contour,
-    clean_vlm_text_output,
     resolve_detection_mode,
     image_to_base64,
     mask_to_base64,

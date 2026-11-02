@@ -10,7 +10,7 @@ import sys
 import time
 from PIL import Image
 
-from ai_service.common.types import FusionResult, ExecutionMeta
+from ai_service.common.types import FusionResult
 from ai_service.common.errors import (
     AIServiceError,
     INVALID_MODALITY_COMBINATION,

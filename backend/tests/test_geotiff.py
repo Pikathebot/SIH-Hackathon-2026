@@ -2,7 +2,6 @@
 Unit tests for GeoTIFF processing and coordinate projection.
 """
 
-import io
 import numpy as np
 import pytest
 import rasterio

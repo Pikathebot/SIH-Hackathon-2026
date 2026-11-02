@@ -1,0 +1,20 @@
+# Lint config for CI and pre-commit. Correctness-focused: pyflakes, syntax/statement errors,
+# bugbear and async pitfalls. Style rules are deliberately off; ruff format is not enforced.
+target-version = "py311"
+line-length = 120
+extend-exclude = ["ai_service/rsunivlm/vendor", "LoRA_Training_Stuffs", "frontend", "tools"]
+
+[lint]
+select = ["E4", "E7", "E9", "F", "B", "ASYNC"]
+ignore = [
+    "E402",     # sys.path is set up before app imports in entry points and tests
+    "B008",     # FastAPI's Depends()/File() in defaults is the framework idiom
+    "B904",     # raise ... from inside except: handled case by case
+    "B905",     # zip(strict=) noise on lists built in lockstep
+    "ASYNC230", # small blocking file IO in handlers (streamed upload writes 1 MB chunks)
+    "ASYNC240",
+]
+
+[lint.per-file-ignores]
+# Compatibility facade: re-exports the helpers that moved to parsing.py / imaging modules
+"ai_service/rsunivlm/inference.py" = ["F401"]

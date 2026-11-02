@@ -48,7 +48,7 @@ async def lifespan(app: FastAPI):
 
     # Bring the database to the latest Alembic revision (adopts legacy DBs in place)
     await init_db()
-    settings.jwt_secret  # resolve (or generate) the signing key at startup, not on first login
+    _ = settings.jwt_secret  # resolve (or generate) the signing key at startup, not on first login
     logger.info("Database initialized")
 
     # Add project root to sys.path so ai_service imports work

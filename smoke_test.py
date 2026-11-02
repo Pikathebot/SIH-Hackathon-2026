@@ -44,7 +44,6 @@ def create_austrian_sentinel2_geotiff_base64(
     include_change: bool = False,
 ) -> str:
     """Creates a georeferenced Austrian Sentinel-2 optical GeoTIFF in EPSG:4326."""
-    import rasterio
     from rasterio.io import MemoryFile
     from rasterio.transform import from_bounds
 
@@ -104,7 +103,6 @@ def create_sentinel1_sar_geotiff_base64(
     size: Tuple[int, int] = (256, 256),
 ) -> str:
     """Creates a Sentinel-1 SAR GeoTIFF with specular water and double-bounce urban."""
-    import rasterio
     from rasterio.io import MemoryFile
     from rasterio.transform import from_bounds
 
@@ -325,7 +323,7 @@ def run_tests(base_url: str = None) -> bool:
                     elif data.get("visual_evidence", {}).get("boxes"):
                         print(f"    • Boxes Found: {len(data['visual_evidence']['boxes'])}")
                     elif data.get("visual_evidence", {}).get("mask_base64"):
-                        print(f"    • Mask Size:   Binary mask generated")
+                        print("    • Mask Size:   Binary mask generated")
                     print(f"    • Confidence:  {data.get('confidence'):.2f} (Source: {data.get('execution_summary', {}).get('parameters', {}).get('confidence_source', 'heuristic')})")
                     print(f"    • Tool Used:   {data.get('execution_summary', {}).get('tool_used')}")
                     print(f"    • Latency:     {data.get('execution_summary', {}).get('latency_ms')} ms")

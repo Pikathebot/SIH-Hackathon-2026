@@ -8,11 +8,6 @@ import pytest
 from PIL import Image
 
 from ai_service.common.types import (
-    VQAResult,
-    CaptioningResult,
-    DetectionResult,
-    ChangeResult,
-    FusionResult,
     ExecutionMeta,
 )
 from ai_service.common.errors import (

@@ -58,7 +58,8 @@ def test_payload_shape_with_images_and_schema(captured):
 
 
 def test_image_downscaled_to_max_side():
-    import base64, io
+    import base64
+    import io
     uri = client_mod._encode_image(Image.new("RGB", (4000, 2000)), 1000)
     img = Image.open(io.BytesIO(base64.b64decode(uri.split(",", 1)[1])))
     assert img.size == (1000, 500)

@@ -13,9 +13,7 @@ import logging
 from typing import Optional
 from pydantic import BaseModel, Field
 from fastapi import APIRouter
-from PIL import Image
 
-from app.geotiff import is_geotiff, process_geotiff
 from app.errors import error_response
 from app.models.api import ErrorResponse, GeospatialMetadata
 from app.orchestrator import _decode_image, QueryValidationError

@@ -16,7 +16,6 @@ from ai_service.common.types import (
     CaptioningResult,
     DetectionResult,
     ChangeResult,
-    ExecutionMeta,
 )
 from ai_service.common.errors import AIServiceError, MODEL_INFERENCE_FAILED
 from ai_service.rsunivlm.parsing import resolve_detection_mode

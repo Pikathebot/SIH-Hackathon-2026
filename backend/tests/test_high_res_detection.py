@@ -4,8 +4,6 @@ End-to-end integration test for high-resolution tiled detection referencing an u
 
 import io
 import numpy as np
-from PIL import Image
-import pytest
 import rasterio
 import rasterio.transform
 
@@ -41,7 +39,6 @@ def test_high_res_tiled_detection_query(authed_client):
     up_res = client.post("/api/v1/upload", files=files)
     assert up_res.status_code == 200
     up_data = up_res.json()
-    asset_url = up_data["url"]
     assert up_data["width"] == 2400
     assert up_data["height"] == 1800
 

@@ -5,8 +5,6 @@ water/river segmentation mask extraction, and Optical-SAR fusion in Real AI Mode
 """
 
 import base64
-import io
-import os
 import sys
 from pathlib import Path
 from typing import Tuple
@@ -14,7 +12,6 @@ from typing import Tuple
 import numpy as np
 import pytest
 import pytest_asyncio
-import rasterio
 from rasterio.io import MemoryFile
 from rasterio.transform import from_bounds
 from httpx import ASGITransport, AsyncClient

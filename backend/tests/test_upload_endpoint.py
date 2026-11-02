@@ -5,7 +5,6 @@ Integration tests for the file upload endpoint (POST /api/v1/upload and GET /api
 import io
 import numpy as np
 from PIL import Image
-import pytest
 import rasterio
 import rasterio.transform
 
