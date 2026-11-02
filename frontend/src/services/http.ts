@@ -32,12 +32,14 @@ export class ApiRequestError extends Error {
   code: string;
   status: number;
   detail?: string;
+  requestId?: string;
 
-  constructor(status: number, code: string, message: string, detail?: string) {
+  constructor(status: number, code: string, message: string, detail?: string, requestId?: string) {
     super(message);
     this.status = status;
     this.code = code;
     this.detail = detail;
+    this.requestId = requestId;
   }
 }
 
@@ -53,6 +55,7 @@ export async function toApiError(response: Response): Promise<ApiRequestError> {
     body?.error?.code || (response.status === 401 ? 'UNAUTHORIZED' : 'INTERNAL_ERROR'),
     body?.error?.message || `Request failed with HTTP status ${response.status}`,
     body?.error?.detail,
+    body?.error?.request_id || response.headers.get('X-Request-ID') || undefined,
   );
 }
 

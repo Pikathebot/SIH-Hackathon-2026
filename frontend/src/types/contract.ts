@@ -94,6 +94,10 @@ export type ErrorCode =
   | 'CONFLICT'
   | 'VALIDATION_ERROR'
   | 'PAYLOAD_TOO_LARGE'
+  | 'QUOTA_EXCEEDED'
+  | 'RATE_LIMITED'
+  | 'QUEUE_FULL'
+  | 'INFERENCE_TIMEOUT'
   | string;
 
 export interface ApiError {
@@ -101,6 +105,7 @@ export interface ApiError {
     code: ErrorCode;
     message: string;
     detail?: string;
+    request_id?: string;
   };
 }
 
@@ -130,6 +135,7 @@ export interface ChatMessage {
     code: ErrorCode;
     message: string;
     detail?: string;
+    requestId?: string;
   };
   loading?: boolean;
   loadingStep?: string;

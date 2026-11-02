@@ -320,6 +320,7 @@ const WorkspaceMain: React.FC = () => {
           message:
             err.message || 'Unable to complete the analysis. Please check your imagery and try again.',
           detail: err.detail || err.stack,
+          requestId: err.requestId,
         },
       };
 
@@ -509,6 +510,11 @@ const WorkspaceMain: React.FC = () => {
                     <div>
                       <p className="font-semibold text-red-delta text-xs mb-1">Analysis Notice</p>
                       <p className="text-text-primary">{msg.error.message}</p>
+                      {msg.error.requestId && (
+                        <p className="mt-1 font-mono text-[10px] text-text-muted select-text">
+                          Request ID: {msg.error.requestId}
+                        </p>
+                      )}
                     </div>
                   </div>
                 </div>
