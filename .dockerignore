@@ -1,0 +1,25 @@
+# Build context for backend/Dockerfile (repo root). Keep it small: models and data are mounted.
+.git
+.venv
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.ruff_cache
+.env
+.env.*
+!.env.example
+
+# Mounted at runtime, never baked into the image
+tools/
+ai_service/rsunivlm/checkpoints/
+ai_service/fusion/checkpoints/*.pkl
+backend/data/
+LoRA_Training_Stuffs/
+
+# Not needed by the backend image
+frontend/
+sample_data/
+reports/
+docs/
+*.md
+!ai_service/**/*.md

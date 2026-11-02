@@ -1,0 +1,18 @@
+# No-GPU variant: slim backend image, mock AI engine, no llama-server.
+#   docker compose -f docker-compose.yml -f docker-compose.cpu.yml up --build
+# Useful on machines without an NVIDIA GPU, for UI work, and in CI.
+services:
+  vlm:
+    profiles: ["gpu"]  # not started unless `--profile gpu` is given
+
+  backend:
+    build:
+      args:
+        FLAVOR: slim
+    image: satquery-backend:slim
+    deploy: !reset {}
+    environment:
+      AI_SERVICE_MODE: mock
+    volumes: !override
+      - satquery-data:/app/backend/data
+    depends_on: !reset {}

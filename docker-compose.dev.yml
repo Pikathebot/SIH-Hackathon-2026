@@ -1,0 +1,35 @@
+# Hot-reload development on top of docker-compose.yml (or the cpu variant):
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+#   docker compose -f docker-compose.yml -f docker-compose.cpu.yml -f docker-compose.dev.yml up --build
+# Backend: source bind-mounted, uvicorn --reload. Frontend: Vite dev server on :3000 instead of nginx.
+# On Windows the native route (start_dev.ps1) reloads faster than bind mounts; this is for parity.
+services:
+  backend:
+    volumes:
+      - ./backend/app:/app/backend/app
+      - ./backend/alembic:/app/backend/alembic
+      - ./ai_service:/app/ai_service
+    environment:
+      LOG_FORMAT: text
+      WATCHFILES_FORCE_POLLING: "true"  # bind mounts from Windows do not deliver inotify events
+    command: ["uvicorn", "app.main:app", "--app-dir", "backend", "--host", "0.0.0.0", "--port", "8000",
+              "--reload", "--reload-dir", "/app/backend/app", "--reload-dir", "/app/ai_service"]
+
+  frontend:
+    build: !reset null
+    image: node:22-alpine
+    working_dir: /app
+    command: sh -c "npm ci --no-audit --no-fund && npx vite --host 0.0.0.0 --port 3000"
+    environment:
+      VITE_PROXY_TARGET: http://backend:8000
+      CHOKIDAR_USEPOLLING: "true"
+    volumes:
+      - ./frontend:/app
+      - frontend-node-modules:/app/node_modules
+    ports: !override
+      - "${FRONTEND_PORT:-3000}:3000"
+    healthcheck:
+      disable: true
+
+volumes:
+  frontend-node-modules:

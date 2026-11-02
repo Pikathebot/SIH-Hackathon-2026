@@ -11,9 +11,10 @@ export default defineConfig({
   },
   server: {
     port: 3000,
+    // VITE_PROXY_TARGET lets the dev container reach the backend service (docker-compose.dev.yml)
     proxy: {
       '/api': {
-        target: 'http://localhost:8000',
+        target: process.env.VITE_PROXY_TARGET || 'http://localhost:8000',
         changeOrigin: true,
       },
     },

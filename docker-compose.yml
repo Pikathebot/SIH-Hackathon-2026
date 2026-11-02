@@ -1,24 +1,102 @@
-version: '3.8'
+# SatQuery AI — full local stack on one NVIDIA GPU (Docker Desktop + WSL2, or Linux + NVIDIA Container Toolkit)
+#
+#   docker compose up --build                 -> http://localhost:3000   (hybrid engine on the GPU)
+#   docker compose -f docker-compose.yml -f docker-compose.cpu.yml up --build   -> mock engine, no GPU
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up           -> hot reload (see that file)
+#
+# Mounted from the host, never baked into images:
+#   tools/models/                        Qwen3-VL GGUF + mmproj for llama-server  (VLM_MODELS_DIR)
+#   ai_service/rsunivlm/checkpoints/     RSUniVLM weights (+ optional lora_adapter)
+# Named volumes: satquery-data (DB, uploads, evidence), hf-cache (SigLIP vision tower, ~1.7 GB on first start).
+# Set HF_CACHE_DIR to a host path (e.g. C:/Users/<you>/.cache/huggingface) to reuse an existing cache.
+#
+# VRAM: llama-server + RSUniVLM peak at ~11.8 GB on a 12 GB card. Close other GPU apps first.
+
+name: satquery
+
+x-gpu: &gpu
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            count: 1
+            capabilities: [gpu]
 
 services:
+  vlm:
+    # llama.cpp server, CUDA 13 build (driver must support CUDA 13; RTX 50-series needs it or 12.8+)
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda13-b12019
+    <<: *gpu
+    volumes:
+      - ${VLM_MODELS_DIR:-./tools/models}:/models:ro
+    command:
+      - --model
+      - /models/${VLM_GGUF:-Qwen3VL-8B-Instruct-Q4_K_M.gguf}
+      - --mmproj
+      - /models/${VLM_MMPROJ:-mmproj-Qwen3VL-8B-Instruct-Q8_0.gguf}
+      - --alias
+      - ${VLM_MODEL:-qwen3-vl-8b}
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+      - --ctx-size
+      - "16384"
+      - --n-gpu-layers
+      - "99"
+      - --jinja
+      - --parallel
+      - "1"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
+      interval: 15s
+      timeout: 5s
+      start_period: 180s
+      retries: 5
+    restart: unless-stopped
+
   backend:
     build:
       context: .
       dockerfile: backend/Dockerfile
-    ports:
-      - "127.0.0.1:8000:8000"  # loopback only: the backend trusts X-Forwarded-For
+      args:
+        FLAVOR: gpu
+    image: satquery-backend:gpu
+    <<: *gpu
     env_file:
-      - .env
+      - path: .env
+        required: false
+    environment:
+      # Container-specific values win over .env (which is written for native runs)
+      DATA_DIR: /app/backend/data
+      AI_SERVICE_MODE: ${AI_SERVICE_MODE:-real}
+      AI_ENGINE: ${AI_ENGINE:-hybrid}
+      VLM_SERVER_URL: http://vlm:8080
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+      LOG_FORMAT: ${LOG_FORMAT:-json}
     volumes:
-      - ./backend/data:/app/backend/data
+      - satquery-data:/app/backend/data
+      - ./ai_service/rsunivlm/checkpoints:/app/ai_service/rsunivlm/checkpoints:ro
+      - ${HF_CACHE_DIR:-hf-cache}:/home/satquery/.cache/huggingface
+    ports:
+      - "127.0.0.1:8000:8000"  # loopback only: the backend trusts X-Forwarded-For from nginx
+    depends_on:
+      vlm:
+        condition: service_healthy
     restart: unless-stopped
 
   frontend:
     build:
       context: ./frontend
-      dockerfile: Dockerfile
+    image: satquery-frontend
     ports:
-      - "3000:80"
+      - "${FRONTEND_PORT:-3000}:8080"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     restart: unless-stopped
+
+volumes:
+  satquery-data:
+  hf-cache:
