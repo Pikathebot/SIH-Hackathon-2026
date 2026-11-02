@@ -1,10 +1,17 @@
 import React from 'react';
-import { QueryImage, TaskType } from '../types/contract';
+import { Modality, TaskType } from '../types/contract';
 import { 
   X, 
   ArrowRight,
   Sparkles
 } from 'lucide-react';
+
+/** One bundled sample image, served from frontend/public/samples/ (see scripts/build_demo_samples.py). */
+export interface PresetSample {
+  file: string;
+  modality: Modality;
+  date?: string;
+}
 
 export interface DemoPreset {
   id: string;
@@ -13,88 +20,60 @@ export interface DemoPreset {
   category: string;
   query: string;
   description: string;
-  images: QueryImage[];
+  samples: PresetSample[];
 }
 
+export const SAMPLES_BASE = '/samples/';
+
+// Every preset runs on the repo's sample_data imagery, uploaded like a user's file,
+// so answers, boxes and map coordinates match what the question asks about.
 export const DEMO_PRESETS: DemoPreset[] = [
+  {
+    id: 'preset-caption',
+    title: 'Scene Description',
+    task: 'captioning',
+    category: 'Sentinel-2',
+    query: 'Describe this scene.',
+    description: 'A real Sentinel-2 true-colour tile, summarised in plain language.',
+    samples: [{ file: 'real_sentinel2_austria_tci.tif', modality: 'optical' }],
+  },
   {
     id: 'preset-vqa',
     title: 'Object Counting & Question Answering',
     task: 'vqa',
     category: 'Visual Q&A',
-    query: 'How many aircraft are parked on the military tarmac?',
-    description: 'Ask any question about items, facilities, or terrain in a satellite photo.',
-    images: [
-      {
-        id: 'img1',
-        modality: 'optical',
-        date: '2024-06-15',
-        name: 'Airbase_Optical.tif',
-        url_or_base64: 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?q=80&w=1200&auto=format&fit=crop',
-        previewUrl: 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?q=80&w=1200&auto=format&fit=crop',
-      },
-    ],
+    query: 'How many ships are in the harbour?',
+    description: 'Ask any question about items, facilities, or terrain in a satellite image.',
+    samples: [{ file: 'optical_port_rotterdam.tif', modality: 'optical' }],
   },
   {
     id: 'preset-bbox',
     title: 'Object & Facility Localization',
     task: 'detection',
     category: 'Target Finding',
-    query: 'Where is the main reservoir and water body in this sector?',
-    description: 'Find and pinpoint coordinates of specific landmarks with bounding boxes.',
-    images: [
-      {
-        id: 'img1',
-        modality: 'optical',
-        date: '2024-05-10',
-        name: 'Reservoir_Sector.tif',
-        url_or_base64: 'https://images.unsplash.com/photo-1508873696983-2df5293cb32f?q=80&w=1200&auto=format&fit=crop',
-        previewUrl: 'https://images.unsplash.com/photo-1508873696983-2df5293cb32f?q=80&w=1200&auto=format&fit=crop',
-      },
-    ],
+    query: 'Locate all aircraft on the airbase.',
+    description: 'Find and pinpoint specific objects with bounding boxes and map coordinates.',
+    samples: [{ file: 'optical_airbase_runway.tif', modality: 'optical' }],
   },
   {
     id: 'preset-seg',
     title: 'Water & Land Cover Highlight',
     task: 'detection',
     category: 'Precision Mapping',
-    query: 'Highlight all coastal water bodies and flooded zones in this image.',
-    description: 'Generates detailed colored pixel overlays on lakes, rivers, forests, or flood zones.',
-    images: [
-      {
-        id: 'img1',
-        modality: 'optical',
-        date: '2024-08-01',
-        name: 'Coastal_Zone.tif',
-        url_or_base64: 'https://images.unsplash.com/photo-1524661135-423995f22d0b?q=80&w=1200&auto=format&fit=crop',
-        previewUrl: 'https://images.unsplash.com/photo-1524661135-423995f22d0b?q=80&w=1200&auto=format&fit=crop',
-      },
-    ],
+    query: 'Highlight the water bodies in this image.',
+    description: 'Pixel-level overlay of lakes, rivers or flood zones (JPEG 2000 input).',
+    samples: [{ file: 'optical_sentinel2_lake.jp2', modality: 'optical' }],
   },
   {
     id: 'preset-change',
     title: 'Temporal Change Detection',
     task: 'change_detection',
     category: 'Monitoring',
-    query: 'What changed between these two dates, and where did new construction or land clearing occur?',
-    description: 'Compare two satellite captures of the same location over time to spot developments.',
-    images: [
-      {
-        id: 'img1',
-        modality: 'optical',
-        date: '2023-01-15',
-        name: 'Earlier_Date_2023.tif',
-        url_or_base64: 'https://images.unsplash.com/photo-1500382017468-9049fed747ef?q=80&w=1200&auto=format&fit=crop',
-        previewUrl: 'https://images.unsplash.com/photo-1500382017468-9049fed747ef?q=80&w=1200&auto=format&fit=crop',
-      },
-      {
-        id: 'img2',
-        modality: 'optical',
-        date: '2024-03-02',
-        name: 'Recent_Date_2024.tif',
-        url_or_base64: 'https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?q=80&w=1200&auto=format&fit=crop',
-        previewUrl: 'https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?q=80&w=1200&auto=format&fit=crop',
-      },
+    query: 'What changed between these two dates, and where did new construction occur?',
+    description: 'Compare two captures of the same location over time to spot developments.',
+    samples: [
+      { file: 'urban_expansion_t1_2021.tif', modality: 'optical', date: '2021-01-01' },
+      { file: 'urban_expansion_t2_2024.tif', modality: 'optical', date: '2024-01-01' },
     ],
   },
   {
@@ -102,25 +81,11 @@ export const DEMO_PRESETS: DemoPreset[] = [
     title: 'Optical + Radar (SAR) Fusion',
     task: 'fusion',
     category: 'All-Weather',
-    query: 'Use optical and radar images together to identify built-up structures and water penetration through cloud cover.',
+    query: 'Use optical and radar images together to classify land cover under the clouds.',
     description: 'Combines optical imagery with penetrating radar data to see through cloud cover.',
-    images: [
-      {
-        id: 'img1',
-        modality: 'optical',
-        date: '2024-07-20',
-        name: 'Optical_Cloudy.tif',
-        url_or_base64: 'https://images.unsplash.com/photo-1451187580459-43490279c0fa?q=80&w=1200&auto=format&fit=crop',
-        previewUrl: 'https://images.unsplash.com/photo-1451187580459-43490279c0fa?q=80&w=1200&auto=format&fit=crop',
-      },
-      {
-        id: 'img2',
-        modality: 'sar',
-        date: '2024-07-20',
-        name: 'Radar_SAR_Band.tif',
-        url_or_base64: 'https://images.unsplash.com/photo-1541185933-ef5d8ed016c2?q=80&w=1200&auto=format&fit=crop',
-        previewUrl: 'https://images.unsplash.com/photo-1541185933-ef5d8ed016c2?q=80&w=1200&auto=format&fit=crop',
-      },
+    samples: [
+      { file: 'cloudy_optical_scene.tif', modality: 'optical' },
+      { file: 'penetrating_sar_scene.tif', modality: 'sar' },
     ],
   },
 ];
@@ -182,9 +147,9 @@ export const DemoPresetSelector: React.FC<DemoPresetSelectorProps> = ({
                     {preset.category}
                   </span>
                   <span className="text-text-muted text-xs">
-                    {preset.images.length === 1 
+                    {preset.samples.length === 1 
                       ? '1 Image' 
-                      : `2 Images (${preset.images.map(i => i.modality.toUpperCase()).join(' + ')})`}
+                      : `2 Images (${preset.samples.map(i => i.modality.toUpperCase()).join(' + ')})`}
                   </span>
                 </div>
                 <h3 className="font-headline font-semibold text-base text-text-primary group-hover:text-primary transition-colors mt-0.5">
@@ -211,7 +176,7 @@ export const DemoPresetSelector: React.FC<DemoPresetSelectorProps> = ({
 
         {/* Footer */}
         <div className="px-6 py-3.5 border-t border-grid-hairline bg-surface-container/60 flex justify-between items-center text-xs text-text-muted">
-          <span>5 ready-to-use analysis demonstrations</span>
+          <span>{DEMO_PRESETS.length} ready-to-use analyses on bundled sample imagery</span>
           <button
             type="button"
             onClick={onClose}

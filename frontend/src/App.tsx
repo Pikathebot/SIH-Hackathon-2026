@@ -7,8 +7,8 @@ import { ReportCard } from './components/ReportCard';
 import { LoadingTrace } from './components/LoadingTrace';
 import { QueryComposer } from './components/QueryComposer';
 import { ImageLightboxModal } from './components/ImageLightboxModal';
-import { DemoPresetSelector, DemoPreset } from './components/DemoPresetSelector';
-import { submitQuery, isBrowserRenderable } from './services/api';
+import { DemoPresetSelector, DemoPreset, SAMPLES_BASE } from './components/DemoPresetSelector';
+import { submitQuery, isBrowserRenderable, uploadLargeImage } from './services/api';
 import {
   assetPreviewUrl,
   createSession,
@@ -231,8 +231,31 @@ const WorkspaceMain: React.FC = () => {
     openSession(failed[0]?.id ?? null);
   };
 
-  const handleSelectPreset = (preset: DemoPreset) => {
-    setComposerState({ query: preset.query, images: preset.images });
+  const handleSelectPreset = async (preset: DemoPreset) => {
+    setComposerState({ query: preset.query, images: [] });
+    try {
+      // Upload the bundled sample files exactly as if the user had attached them.
+      const images = await Promise.all(
+        preset.samples.map(async (s, i): Promise<QueryImage> => {
+          const res = await fetch(`${SAMPLES_BASE}${s.file}`);
+          if (!res.ok) throw new Error(`Sample image ${s.file} is missing (HTTP ${res.status}).`);
+          const blob = await res.blob();
+          const up = await uploadLargeImage(new File([blob], s.file, { type: blob.type || 'image/tiff' }));
+          return {
+            id: `preset_${Date.now()}_${i + 1}`,
+            modality: s.modality,
+            date: s.date ?? new Date().toISOString().split('T')[0],
+            url_or_base64: up.url,
+            asset_id: up.asset_id,
+            previewUrl: up.preview_base64,
+            name: `${up.filename} (${(blob.size / (1024 * 1024)).toFixed(1)} MB)`,
+          };
+        })
+      );
+      setComposerState({ query: preset.query, images });
+    } catch (err: any) {
+      setLoadError(err?.message || 'Could not load the sample images.');
+    }
   };
 
   const handleSignOut = async () => {
