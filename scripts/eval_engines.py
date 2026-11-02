@@ -58,12 +58,19 @@ SCENARIOS = [
      "Describe the urban expansion between the two images.",
      [(S / "bitemporal_change/urban_expansion_t1_2021.tif", "optical"),
       (S / "bitemporal_change/urban_expansion_t2_2024.tif", "optical")]),
+    ("JP2 lake segmentation", "detection",
+     "Highlight the water bodies in this image.",
+     [(S / "optical/optical_sentinel2_lake.jp2", "optical")]),
+    ("Optical + SAR fusion", "fusion",
+     "Classify land cover under the clouds using the radar image.",
+     [(S / "cross_modal_fusion/cloudy_optical_scene.tif", "optical"),
+      (S / "cross_modal_fusion/penetrating_sar_scene.tif", "sar")]),
 ]
 
 
 def _load(path: Path):
     b64 = base64.b64encode(path.read_bytes()).decode("ascii")
-    img, _geo = _decode_image(f"data:image/tiff;base64,{b64}")
+    img, _geo = _decode_image(b64)
     return img
 
 
@@ -76,6 +83,8 @@ def _run(engine, task, query, images):
         return engine.run_detection(images[0], query)
     if task == "change_detection":
         return engine.run_change_detection(images[0], images[1], query)
+    if task == "fusion":
+        return engine.run_fusion(images[0], images[1], query)
     raise ValueError(task)
 
 
