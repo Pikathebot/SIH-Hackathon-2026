@@ -29,15 +29,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Restore the session from the httpOnly refresh cookie on first load.
   useEffect(() => {
     let cancelled = false;
-    authApi.restoreSession().then((auth) => {
-      if (cancelled) return;
-      if (auth) {
-        setUser(auth.user);
-        setStatus('authenticated');
-      } else {
-        setStatus('anonymous');
+    // A transient failure (rate limit, server restarting, network) is retried a few times
+    // before giving up to the sign-in page; only a definite "no session" signs out at once.
+    (async () => {
+      for (let attempt = 0; attempt < 4 && !cancelled; attempt++) {
+        try {
+          const auth = await authApi.restoreSession();
+          if (cancelled) return;
+          if (auth) {
+            setUser(auth.user);
+            setStatus('authenticated');
+          } else {
+            setStatus('anonymous');
+          }
+          return;
+        } catch {
+          await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
+        }
       }
-    });
+      if (!cancelled) setStatus('anonymous');
+    })();
     setSessionExpiredHandler(signOutLocally);
     return () => {
       cancelled = true;

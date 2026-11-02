@@ -59,21 +59,30 @@ export async function toApiError(response: Response): Promise<ApiRequestError> {
   );
 }
 
-/** Exchange the refresh cookie for a new access token. Single-flight. Resolves null if signed out. */
+/**
+ * Exchange the refresh cookie for a new access token. Single-flight.
+ * Resolves null only when the server says the session is gone (401/403). A transient
+ * failure (429 rate limit, 5xx, network error) rejects with an ApiRequestError instead,
+ * so callers show a retryable error rather than signing the user out.
+ */
 export function refreshAccessToken(): Promise<AuthResponse | null> {
   if (!refreshInFlight) {
     refreshInFlight = (async () => {
+      let res: Response;
       try {
-        const res = await fetch(`${BASE_URL}/api/v1/auth/refresh`, { method: 'POST', credentials: 'include' });
-        if (!res.ok) {
+        res = await fetch(`${BASE_URL}/api/v1/auth/refresh`, { method: 'POST', credentials: 'include' });
+      } catch {
+        throw new ApiRequestError(0, 'NETWORK_ERROR', 'Cannot reach the server. Check your connection and try again.');
+      }
+      try {
+        if (res.status === 401 || res.status === 403) {
           setAccessToken(null);
           return null;
         }
+        if (!res.ok) throw await toApiError(res);
         const auth = (await res.json()) as AuthResponse;
         setAccessToken(auth.access_token);
         return auth;
-      } catch {
-        return null;
       } finally {
         refreshInFlight = null;
       }
