@@ -117,3 +117,29 @@ def test_default_engine_is_hybrid():
     if "AI_ENGINE" not in os.environ:
         assert config.AI_ENGINE == "hybrid"
     assert build_engine("", "mock").name == "hybrid"
+
+
+# ── keyword intent: firm cues are never overridden by the LLM ─────────────
+@pytest.mark.parametrize("query,task,firm", [
+    ("Is there a river in this image?", "vqa", True),
+    ("Are there bright metallic targets?", "vqa", True),
+    ("How many aircraft are parked?", "vqa", True),
+    ("Does the scene contain a port?", "vqa", True),
+    ("Where are the ships?", "detection", True),
+    ("Can you find the ships?", "detection", True),
+    ("Locate all aircraft.", "detection", True),
+    ("Segment the water.", "detection", True),
+    ("Describe this scene.", "captioning", True),
+    ("What is here?", "vqa", False),
+    ("Ships near the pier", "vqa", False),
+])
+def test_keyword_intent_firmness(query, task, firm):
+    assert orchestrator.keyword_intent(_req(query)) == (task, firm)
+
+
+def test_llm_intent_cannot_override_firm_keyword(monkeypatch):
+    monkeypatch.setattr(orchestrator, "ENGINE", _engine_with_classifier(lambda q, m: "detection"))
+    monkeypatch.setattr(orchestrator, "LLM_INTENT_ENABLED", True)
+    req = _req("Is there a river in this image?")
+    task, firm = orchestrator.keyword_intent(req)
+    assert asyncio.run(orchestrator._maybe_llm_intent(req, task, firm)) == "vqa"

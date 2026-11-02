@@ -75,6 +75,12 @@ class JsonFormatter(logging.Formatter):
 
 
 def configure_logging() -> None:
+    # A redirected stdout on Windows is cp1252; without this any non-ASCII text in a
+    # log line (a user's query, a filename) makes logging print a traceback instead.
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
+    except (AttributeError, ValueError):  # not a TextIOWrapper (e.g. captured by pytest)
+        pass
     handler = logging.StreamHandler(sys.stdout)
     handler.addFilter(_RequestIdFilter())
     if settings.log_format.lower() == "json":

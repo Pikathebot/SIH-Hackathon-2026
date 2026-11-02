@@ -183,6 +183,22 @@ def classify_intent(request: QueryRequest) -> str:
 
     Values from CONTRACT.md §5: vqa | captioning | detection | change_detection | fusion
     """
+    return keyword_intent(request)[0]
+
+
+# Yes/no and counting questions are answered in words, whatever object they name
+# ("Is there a river?", "Are there ships?", "How many aircraft?").
+_FIRM_VQA = re.compile(
+    r"^(?:is\s+there|are\s+there|is|are|does|do|did|was|were|has|have|how\s+many|how\s+much)\b"
+)
+_LOCATE_VERBS = re.compile(r"\b(?:locate|find|detect|where|show|point\s+out|mark)\b")
+
+
+def keyword_intent(request: QueryRequest) -> tuple[str, bool]:
+    """Keyword rules → (task, firm). A firm result comes from an explicit cue
+    (an action verb, a yes/no or counting question, a two-image combination) and
+    is never overridden by the LLM classifier; a soft one (open wh-question or the
+    default) may be refined by it."""
     images = request.images
     query_raw = request.query.strip()
     query_lower = query_raw.lower()
@@ -191,43 +207,48 @@ def classify_intent(request: QueryRequest) -> str:
     # Two-image tasks are determined purely by modality combination
     if len(images) == 2:
         if modalities == ["optical", "optical"]:
-            return "change_detection"
+            return "change_detection", True
         if modalities == ["optical", "sar"]:
-            return "fusion"
+            return "fusion", True
 
     # Single-image: disambiguate by query structure and action intent
 
     # 1. Explicit pixel segmentation / masking / bounding box actions always trigger detection
     if re.search(r"\b(?:segment|segmentation|highlight|mask|bounding\s+box(?:es)?|draw\s+box(?:es)?)\b", query_lower):
-        return "detection"
+        return "detection", True
 
-    # 2. Natural descriptive/factual questions (What/Which/Why/How/Is/Are/Name/Can you...)
-    # Route to VQA unless the question explicitly asks "Where is/are..." (spatial localization)
-    is_question = bool(re.search(r"^(?:what|which|why|how|is\s+there|are\s+there|can\s+you|does|name\s+the|tell\s+me)\b", query_lower))
+    # 2. Questions. Yes/no and counting questions are VQA; a request phrased as a
+    #    question ("Can you find the ships?", "Where are the aircraft?") is detection.
+    if _FIRM_VQA.search(query_lower):
+        return "vqa", True
+    is_question = bool(re.search(r"^(?:what|which|why|how|can\s+you|could\s+you|name\s+the|tell\s+me|where)\b", query_lower))
     if is_question:
         if re.search(r"\bwhere\s+(?:is|are)\b", query_lower):
-            return "detection"
-        return "vqa"
+            return "detection", True
+        if re.search(r"^(?:can|could)\s+you\b", query_lower) and _LOCATE_VERBS.search(query_lower):
+            return "detection", True
+        return "vqa", False
 
     # 3. Detection & visual localization commands ("Locate the airport", "Find the river", "Where are the aircraft")
     if re.search(r"\b(?:locate|find|detect|where)\b", query_lower):
-        return "detection"
+        return "detection", True
 
     # 4. Captioning commands ("Describe this scene", "Summarize the image", "Caption this")
     if re.search(r"\b(?:caption|describe|description|summarize|summarise|overview|what\s+do\s+you\s+see|what\s+is\s+in\s+this\s+image)\b", query_lower):
-        return "captioning"
+        return "captioning", True
 
     # Default: VQA
-    return "vqa"
+    return "vqa", False
 
 
 _SINGLE_IMAGE_TASKS = ("vqa", "captioning", "detection")
 
 
-async def _maybe_llm_intent(request: QueryRequest, keyword_task: str) -> str:
-    """Refine single-image intent with the engine's LLM classifier if enabled."""
+async def _maybe_llm_intent(request: QueryRequest, keyword_task: str, firm: bool = False) -> str:
+    """Refine a soft single-image keyword intent with the engine's LLM classifier if enabled."""
     if (
-        ENGINE is None
+        firm
+        or ENGINE is None
         or ENGINE.classify_intent is None
         or ENGINE.mode != "real"
         or not LLM_INTENT_ENABLED
@@ -244,7 +265,7 @@ async def _maybe_llm_intent(request: QueryRequest, keyword_task: str) -> str:
         return keyword_task
     if llm_task in _SINGLE_IMAGE_TASKS:
         if llm_task != keyword_task:
-            logger.info("LLM intent override: keyword=%s → llm=%s", keyword_task, llm_task)
+            logger.info("LLM intent override: keyword=%s -> llm=%s", keyword_task, llm_task)
         return llm_task
     return keyword_task
 
@@ -624,8 +645,8 @@ async def process_query(request: QueryRequest, user=None, db=None) -> QueryRespo
 
     # 3. Classify intent — keyword rules first, then (optionally) the VLM for
     #    single-image queries; any LLM failure keeps the keyword result.
-    task = classify_intent(request)
-    task = await _maybe_llm_intent(request, task)
+    task, firm = keyword_intent(request)
+    task = await _maybe_llm_intent(request, task, firm)
 
     # 4. Decode images (file decode and URL download run off the event loop)
     decoded_pairs = []
