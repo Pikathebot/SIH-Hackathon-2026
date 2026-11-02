@@ -128,7 +128,7 @@ Trivial liveness check for local dev / demo rehearsal, no auth.
 
 *(v1.2.0, additive)* The response also includes an optional `engine` object, for example `{"engine": "hybrid", "mode": "real", "notes": [], "vlm_server": "http://127.0.0.1:8080", "vlm_model": "qwen3-vl-8b", "vlm_available": true}`. The `vlm_*` keys are present only for the `qwen` and `hybrid` engines in real mode.
 
-*(v2.3.0, additive)* The response also includes `database` (bool, whether a trivial query succeeds), `queue` (`{"running": 0, "waiting": 0, "concurrency": 1, "max_waiting": 4}`) and `gpu` (`{"name": "...", "memory_used_mb": 0, "memory_total_mb": 0}`, or `null` when no CUDA device is in use). `status` stays `"ok"` while the process is alive, even if a dependency is down. Use `/ready` to gate traffic.
+*(v2.3.0, additive)* The response also includes `database` (bool, whether a trivial query succeeds), `queue` (`{"running": 0, "waiting": 0, "concurrency": 1, "max_waiting": 4}`) and `gpu` (`{"name": "...", "memory_used_mb": 0, "memory_total_mb": 0, "process_reserved_mb": 0}`, or `null` when no CUDA device is in use). `memory_used_mb` is device-wide across all processes, including llama-server, and is `null` when NVML is unavailable. `process_reserved_mb` is what the backend's own PyTorch allocator holds. `status` stays `"ok"` while the process is alive, even if a dependency is down. Use `/ready` to gate traffic.
 
 ### `GET /api/v1/ready` *(v2.3.0)*
 
