@@ -17,6 +17,12 @@ import {
   Loader2
 } from 'lucide-react';
 
+/** A full date in the file name (2024-06-15, 2024_06_15 or 20240615, as in Sentinel product names), else undefined. */
+export function dateFromFilename(name: string): string | undefined {
+  const m = /(?:^|[^0-9])((?:19|20)\d{2})[-_]?(0[1-9]|1[0-2])[-_]?(0[1-9]|[12]\d|3[01])(?![0-9])/.exec(name);
+  return m ? `${m[1]}-${m[2]}-${m[3]}` : undefined;
+}
+
 interface QueryComposerProps {
   onExecute: (query: string, images: QueryImage[]) => void;
   isLoading: boolean;
@@ -38,6 +44,7 @@ export const QueryComposer: React.FC<QueryComposerProps> = ({
   const [images, setImages] = useState<QueryImage[]>(initialImages);
   const [showImageDrawer, setShowImageDrawer] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<Record<string, number>>({});
+  const [notice, setNotice] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Sync when initialQuery/initialImages changes
@@ -53,9 +60,10 @@ export const QueryComposer: React.FC<QueryComposerProps> = ({
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
+    setNotice(null);
     const remainingSlots = 2 - images.length;
     if (remainingSlots <= 0) {
-      alert('A maximum of 2 satellite images can be attached per analysis.');
+      setNotice('A maximum of 2 satellite images can be attached per analysis.');
       return;
     }
 
@@ -69,7 +77,8 @@ export const QueryComposer: React.FC<QueryComposerProps> = ({
       const newImage: QueryImage = {
         id: imgId,
         modality: 'optical',
-        date: new Date().toISOString().split('T')[0],
+        // Only a date the file name states; the capture date is otherwise unknown and left for the user.
+        date: dateFromFilename(file.name),
         url_or_base64: '',
         previewUrl: undefined,
         name: `${file.name} (${fileSizeMB} MB)`,
@@ -98,7 +107,7 @@ export const QueryComposer: React.FC<QueryComposerProps> = ({
           )
         );
       } catch (err: any) {
-        alert(`Failed to upload "${file.name}": ${err?.message || 'Upload failed'}`);
+        setNotice(`Could not upload "${file.name}": ${err?.message || 'Upload failed'}`);
         setImages((prev) => prev.filter((img) => img.id !== imgId));
       } finally {
         setUploadProgress((prev) => {
@@ -134,6 +143,10 @@ export const QueryComposer: React.FC<QueryComposerProps> = ({
     );
   };
 
+  // An unsupported image combination is rejected by the API; block it here instead.
+  const isInvalidCombo =
+    images.length === 2 && images[0].modality === 'sar' && images[1].modality === 'sar';
+
   // Client-side validation per API_CONTRACT.md
   const getValidationWarning = (): string | null => {
     if (images.length === 0) {
@@ -150,6 +163,9 @@ export const QueryComposer: React.FC<QueryComposerProps> = ({
       if (!isBothOptical && !isOpticalSar) {
         return 'Supported 2-image tasks: 2 Optical images for Change Detection, or 1 Optical + 1 Radar (SAR) for Fusion.';
       }
+      if (isBothOptical && (!images[0].date || !images[1].date)) {
+        return 'Set both capture dates so the earlier image is treated as "before".';
+      }
     }
     return null;
   };
@@ -159,7 +175,7 @@ export const QueryComposer: React.FC<QueryComposerProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!query.trim() || images.length === 0 || isLoading || isUploading) return;
+    if (!query.trim() || images.length === 0 || isLoading || isUploading || isInvalidCombo) return;
     
     // Dispatch query to parent
     onExecute(query.trim(), images);
@@ -333,6 +349,14 @@ export const QueryComposer: React.FC<QueryComposerProps> = ({
       {/* Main Command Input Row */}
       <form onSubmit={handleSubmit} className="p-3.5 md:px-margin-page">
         <div className="max-w-4xl mx-auto flex flex-col gap-2">
+          {/* Upload / attachment notice */}
+          {notice && (
+            <div role="alert" className="flex items-center gap-2 text-red-delta text-xs bg-red-delta/10 px-3 py-1.5 border border-red-delta/30 rounded-lg">
+              <AlertCircle className="w-4 h-4 flex-shrink-0" />
+              <span className="flex-1">{notice}</span>
+              <button type="button" onClick={() => setNotice(null)} aria-label="Dismiss" className="cursor-pointer"><X className="w-3.5 h-3.5" /></button>
+            </div>
+          )}
           {/* Quick status line above input */}
           <div className="flex items-center justify-between px-1 text-xs text-text-muted">
             <div className="flex items-center gap-2">
@@ -423,8 +447,8 @@ export const QueryComposer: React.FC<QueryComposerProps> = ({
             {/* Analyze Button */}
             <button
               type="submit"
-              disabled={!query.trim() || images.length === 0 || isLoading || isUploading}
-              title={isUploading ? 'Waiting for the upload to finish' : undefined}
+              disabled={!query.trim() || images.length === 0 || isLoading || isUploading || isInvalidCombo}
+              title={isUploading ? 'Waiting for the upload to finish' : isInvalidCombo ? 'Two radar images cannot be analysed together' : undefined}
               className="px-5 py-3.5 bg-primary-container text-on-primary-container hover:bg-primary transition-all border-l border-grid-hairline text-xs font-bold uppercase flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer rounded-r-xl shadow-xs"
             >
               <span>{isLoading ? 'Analyzing...' : 'Analyze'}</span>

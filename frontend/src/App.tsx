@@ -244,7 +244,7 @@ const WorkspaceMain: React.FC = () => {
           return {
             id: `preset_${Date.now()}_${i + 1}`,
             modality: s.modality,
-            date: s.date ?? new Date().toISOString().split('T')[0],
+            date: s.date,
             url_or_base64: up.url,
             asset_id: up.asset_id,
             previewUrl: up.preview_base64,

@@ -1,5 +1,6 @@
 import { QueryResponse, QueryImage } from '../types/contract';
 import { isBrowserRenderable } from '../services/api';
+import { answerToHtml, escapeHtml } from './answerFormat';
 
 /**
  * Trigger download of any text/data blob in the browser.
@@ -238,6 +239,9 @@ export function exportMissionPDF(
       color: #1e293b;
       margin-bottom: 14px;
     }
+    .answer-box p { margin: 0 0 6px 0; }
+    .answer-box ul, .answer-box ol { margin: 0 0 6px 0; padding-left: 20px; }
+    .answer-box code { font-family: monospace; background: #e2e8f0; padding: 0 3px; border-radius: 3px; }
     .grid-2 {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -328,16 +332,16 @@ export function exportMissionPDF(
       <p>Interactive Vision-Language Remote Sensing Analysis • Problem Statement 26167</p>
     </div>
     <div style="text-align: right;">
-      <span class="badge">Task: ${response.task.toUpperCase()}</span>
+      <span class="badge">Task: ${escapeHtml(response.task.toUpperCase())}</span>
       <span class="confidence-badge">${Math.round(response.confidence * 100)}% Confidence</span>
-      <div style="font-size: 10px; color: #64748b; margin-top: 4px;">${timestamp}</div>
+      <div style="font-size: 10px; color: #64748b; margin-top: 4px;">${escapeHtml(timestamp)}</div>
     </div>
   </div>
 
   <div class="section">
     <div class="section-title">Executive Findings</div>
     <div class="answer-box">
-      ${response.answer || 'Analysis complete.'}
+      ${answerToHtml(response.answer || 'Analysis complete.')}
     </div>
   </div>
 
@@ -347,19 +351,19 @@ export function exportMissionPDF(
       <table class="meta-table">
         <tr>
           <th>Coordinate System (CRS)</th>
-          <td>${geo?.crs || 'Standard Normalized'}</td>
+          <td>${escapeHtml(geo?.crs || 'Standard Normalized')}</td>
         </tr>
         <tr>
           <th>WGS84 Bounds</th>
-          <td>${geo?.image_bounds ? `[${geo.image_bounds.join(', ')}]` : 'N/A'}</td>
+          <td>${geo?.image_bounds ? escapeHtml(`[${geo.image_bounds.join(', ')}]`) : 'N/A'}</td>
         </tr>
         <tr>
           <th>Input Modality</th>
-          <td>${primaryImage?.modality ? primaryImage.modality.toUpperCase() : 'Optical'}</td>
+          <td>${escapeHtml(primaryImage?.modality ? primaryImage.modality.toUpperCase() : 'Optical')}</td>
         </tr>
         <tr>
           <th>Acquisition Date</th>
-          <td>${primaryImage?.date || 'N/A'}</td>
+          <td>${escapeHtml(primaryImage?.date || 'N/A')}</td>
         </tr>
       </table>
     </div>
@@ -369,19 +373,19 @@ export function exportMissionPDF(
       <table class="meta-table">
         <tr>
           <th>Routing Tool</th>
-          <td>${exec?.tool_used || 'RSUniVLM Specialist'}</td>
+          <td>${escapeHtml(exec?.tool_used || 'RSUniVLM Specialist')}</td>
         </tr>
         <tr>
           <th>Inference Latency</th>
-          <td>${exec?.latency_ms ? `${exec.latency_ms} ms` : 'Fast'}</td>
+          <td>${escapeHtml(exec?.latency_ms ? `${exec.latency_ms} ms` : 'Fast')}</td>
         </tr>
         <tr>
           <th>Inputs Validated</th>
-          <td>${exec?.inputs_validated ? 'PASSED (Contract v1.0.0)' : 'PASSED'}</td>
+          <td>${exec?.inputs_validated ? 'PASSED' : 'NOT VALIDATED'}</td>
         </tr>
         <tr>
           <th>Band Resolution</th>
-          <td>${exec?.parameters?.band_resolution_tier || 'standard'}</td>
+          <td>${escapeHtml(exec?.parameters?.band_resolution_tier || 'standard')}</td>
         </tr>
       </table>
     </div>
@@ -394,15 +398,15 @@ export function exportMissionPDF(
     <div class="section-title">Visual Evidence & Spatial Viewport</div>
     <div class="image-preview-container">
       <div class="image-box">
-        <img src="${safePrimaryImg}" alt="Primary Imagery">
-        <div class="image-caption">${primaryImage?.name || 'Primary Satellite Observation'} (${primaryImage?.modality || 'optical'})</div>
+        <img src="${escapeHtml(safePrimaryImg)}" alt="Primary Imagery">
+        <div class="image-caption">${escapeHtml(primaryImage?.name || 'Primary Satellite Observation')} (${escapeHtml(primaryImage?.modality || 'optical')})</div>
       </div>
       ${
         safeSecondaryImg
           ? `
       <div class="image-box">
-        <img src="${safeSecondaryImg}" alt="Secondary Imagery">
-        <div class="image-caption">${secondaryImage?.name || 'Secondary Observation'} (${secondaryImage?.modality || 'comparison'})</div>
+        <img src="${escapeHtml(safeSecondaryImg)}" alt="Secondary Imagery">
+        <div class="image-caption">${escapeHtml(secondaryImage?.name || 'Secondary Observation')} (${escapeHtml(secondaryImage?.modality || 'comparison')})</div>
       </div>
       `
           : ''
@@ -437,8 +441,8 @@ export function exportMissionPDF(
               return `
             <tr>
               <td><b>Feature #${i + 1}</b></td>
-              <td>[${box.join(', ')}]</td>
-              <td>${centerLat !== 'N/A' ? `${centerLat}° N, ${centerLon}° E` : 'Calibrated'}</td>
+              <td>${escapeHtml(`[${box.join(', ')}]`)}</td>
+              <td>${centerLat !== 'N/A' ? escapeHtml(`${centerLat}° N, ${centerLon}° E`) : 'N/A'}</td>
               <td><span style="color: #0284c7; font-weight: 600;">Verified</span></td>
             </tr>
             `;

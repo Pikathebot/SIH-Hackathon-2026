@@ -4,6 +4,7 @@ import { CoordinateTickFrame } from './CoordinateTickFrame';
 import { ExecutionSummaryPanel } from './ExecutionSummaryPanel';
 import { DualImageSplitSlider } from './DualImageSplitSlider';
 import { isBrowserRenderable } from '../services/api';
+import { AnswerText } from '../utils/answerFormat';
 import { exportGeoJSON, exportReportJSON, exportMissionPDF } from '../utils/reportExport';
 import { 
   Radar, 
@@ -159,7 +160,7 @@ export const ReportCard: React.FC<ReportCardProps> = ({
       <div className="p-6 flex flex-col gap-5">
         {/* Natural-Language Answer Text */}
         <div className="text-base leading-relaxed text-text-primary bg-surface-container/30 p-4 border-l-3 border-primary rounded-xl shadow-xs">
-          {response.answer || 'Analysis complete. Visual results are shown below.'}
+          <AnswerText text={response.answer || 'Analysis complete. Visual results are shown below.'} />
         </div>
 
         {/* Unverified Band Ordering Warning */}
