@@ -1,6 +1,6 @@
 # API_CONTRACT.md — Frontend ↔ Backend HTTP Contract
 
-**Version:** 2.3.0 (2.3.0 adds request IDs, rate limits, the GPU queue errors, `GET /ready` and per-user storage quotas; see §6. 2.2.0 adds `HistoryEntry.images`; 2.1.0 adds `GET /assets/{asset_id}/preview`; 2.0.0 made `/query`, `/upload`, `/assets` and `/preview` require authentication; see §5)
+**Version:** 2.4.0 (2.4.0 adds `visual_evidence.image_size`, the pixel grid `boxes` are in; see §1. 2.3.0 adds request IDs, rate limits, the GPU queue errors, `GET /ready` and per-user storage quotas; see §6. 2.2.0 adds `HistoryEntry.images`; 2.1.0 adds `GET /assets/{asset_id}/preview`; 2.0.0 made `/query`, `/upload`, `/assets` and `/preview` require authentication; see §5)
 **Base URL (local dev):** `http://localhost:8000`
 **Consumers:** `frontend/` (Person 4)
 **Producers:** `backend/` (Person 3)
@@ -56,6 +56,7 @@ Constraints:
   "visual_evidence": {
     "type": "none | bbox | mask",
     "boxes": [[51, 384, 235, 506]],
+    "image_size": [512, 512],
     "mask_base64": null,
     "overlay_base64": null,
     "geospatial": {
@@ -79,6 +80,7 @@ Constraints:
 Field notes:
 - `visual_evidence.type` determines which of `boxes` / `mask_base64` / `overlay_base64` is populated; the other(s) are `null`. `type: "none"` (e.g. for plain VQA answers) means all three are `null`.
 - `boxes` format when present: array of `[x1, y1, x2, y2]` in pixel coordinates relative to the **first** submitted image, one array per detected region (usually length 1 for this PS's use cases).
+- `image_size` *(v2.4.0, additive)*: `[width, height]` of the pixel grid `boxes` are expressed in; present whenever `boxes` is non-empty, otherwise `null`. It is the size of the image the detector saw (a large raster may be decoded at reduced size, and tiled detection reports full-raster pixels), so it can differ from both the upload's `width`/`height` and the preview's size. Clients draw a box at `x / image_size[0]`, `y / image_size[1]` of the displayed image. Responses from before v2.4.0 omit it.
 - `execution_summary` is **always present**, even on paths that return a low-confidence or partial answer. This is the field the frontend renders in the "execution trace panel" — it is a required demo feature, not decoration.
 - `tool_used` values are the canonical enum from `CONTRACT.md` §5 — frontend should treat unrecognized values defensively (render the raw string) rather than crash, in case a new tool is added mid-sprint.
 
