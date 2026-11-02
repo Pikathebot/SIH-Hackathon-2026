@@ -22,6 +22,7 @@ os.environ.pop("DATABASE_URL", None)
 os.environ["SECRET_KEY"] = "test-secret-key-not-for-production-use-0123456789"
 os.environ.setdefault("AI_SERVICE_MODE", "mock")
 os.environ["ALLOW_REGISTRATION"] = "true"
+os.environ["RATE_LIMIT_ENABLED"] = "false"  # tests register many users from one IP; test_hardening enables it
 
 _backend = Path(__file__).resolve().parent.parent
 for p in (str(_backend), str(_backend.parent)):

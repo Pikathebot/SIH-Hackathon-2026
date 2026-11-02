@@ -67,7 +67,8 @@ def test_wrong_password_and_unknown_email_look_the_same(sync_client):
     a = sync_client.post("/api/v1/auth/login", json={"email": email, "password": "wrong-password-123"})
     b = sync_client.post("/api/v1/auth/login", json={"email": _email(), "password": "wrong-password-123"})
     assert a.status_code == b.status_code == 401
-    assert a.json() == b.json()
+    strip = lambda r: {k: v for k, v in r.json()["error"].items() if k != "request_id"}  # noqa: E731
+    assert strip(a) == strip(b)
 
 
 @pytest.mark.parametrize("method,path", [

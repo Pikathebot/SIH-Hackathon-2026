@@ -20,6 +20,7 @@ from typing import Optional
 from fastapi import APIRouter, File, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
+from sqlalchemy import func, select
 
 from app.config import DATA_DIR, UPLOADS_DIR, settings
 from app.errors import ApiError
@@ -60,6 +61,15 @@ def _build_preview(path) -> tuple[str, object, object]:
                         413: {"model": ErrorResponse}, 500: {"model": ErrorResponse}})
 async def upload_file(user: CurrentUser, db: DbSession, file: UploadFile = File(...)) -> UploadResponse:
     max_bytes = settings.max_upload_mb * 1024 * 1024
+    # Per-user storage quota (API v2.3.0): what is left after this user's existing uploads
+    quota_left = None
+    if settings.user_quota_mb > 0:
+        used = (await db.execute(select(func.coalesce(func.sum(ImageRecord.size_bytes), 0))
+                                 .where(ImageRecord.user_id == user.id))).scalar_one()
+        quota_left = settings.user_quota_mb * 1024 * 1024 - int(used)
+        if quota_left <= 0:
+            raise ApiError(413, "QUOTA_EXCEEDED",
+                           f"Your storage quota of {settings.user_quota_mb} MB is full.")
     original_name = (file.filename or "upload").replace("\\", "/").rsplit("/", 1)[-1][:255] or "upload"
 
     first = await file.read(_CHUNK)
@@ -81,6 +91,9 @@ async def upload_file(user: CurrentUser, db: DbSession, file: UploadFile = File(
                 total += len(chunk)
                 if total > max_bytes:
                     raise ApiError(413, "PAYLOAD_TOO_LARGE", f"File is larger than {settings.max_upload_mb} MB.")
+                if quota_left is not None and total > quota_left:
+                    raise ApiError(413, "QUOTA_EXCEEDED",
+                                   f"This upload would exceed your storage quota of {settings.user_quota_mb} MB.")
                 sha.update(chunk)
                 out.write(chunk)
                 chunk = await file.read(_CHUNK)

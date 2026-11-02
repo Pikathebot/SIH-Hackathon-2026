@@ -85,11 +85,14 @@ class ErrorDetail(BaseModel):
 
     code is one of:
       INVALID_IMAGE_COUNT | INVALID_MODALITY_COMBINATION |
-      UNSUPPORTED_FORMAT | MODEL_INFERENCE_FAILED | INTERNAL_ERROR
+      UNSUPPORTED_FORMAT | MODEL_INFERENCE_FAILED | INTERNAL_ERROR | UNAUTHORIZED |
+      FORBIDDEN | NOT_FOUND | CONFLICT | VALIDATION_ERROR | PAYLOAD_TOO_LARGE |
+      QUOTA_EXCEEDED | RATE_LIMITED | QUEUE_FULL | INFERENCE_TIMEOUT
     """
     code: str
     message: str
     detail: Optional[str] = None
+    request_id: Optional[str] = None  # v2.3.0: same value as the X-Request-ID header
 
 
 class ErrorResponse(BaseModel):
@@ -107,6 +110,10 @@ class HealthResponse(BaseModel):
     fusion_loaded: bool
     # Additive (API_CONTRACT v1.2): active engine + model-server reachability
     engine: Optional[dict] = None
+    # Additive (API_CONTRACT v2.3.0)
+    database: Optional[bool] = None
+    queue: Optional[dict] = None
+    gpu: Optional[dict] = None
 
 
 # ---------------------------------------------------------------------------

@@ -13,9 +13,11 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.models.api import ErrorDetail, ErrorResponse
+from app.observability import current_request_id
 
 _STATUS_CODES = {400: "VALIDATION_ERROR", 401: "UNAUTHORIZED", 403: "FORBIDDEN", 404: "NOT_FOUND",
-                 405: "VALIDATION_ERROR", 409: "CONFLICT", 413: "PAYLOAD_TOO_LARGE", 422: "VALIDATION_ERROR"}
+                 405: "VALIDATION_ERROR", 409: "CONFLICT", 413: "PAYLOAD_TOO_LARGE", 422: "VALIDATION_ERROR",
+                 429: "RATE_LIMITED", 503: "QUEUE_FULL", 504: "INFERENCE_TIMEOUT"}
 
 
 class ApiError(Exception):
@@ -31,7 +33,8 @@ class ApiError(Exception):
 
 def error_response(status_code: int, code: str, message: str, detail: Optional[str] = None,
                    headers: Optional[dict] = None) -> JSONResponse:
-    body = ErrorResponse(error=ErrorDetail(code=code, message=message, detail=detail)).model_dump()
+    body = ErrorResponse(error=ErrorDetail(code=code, message=message, detail=detail,
+                                           request_id=current_request_id())).model_dump()
     return JSONResponse(status_code=status_code, content=body, headers=headers)
 
 

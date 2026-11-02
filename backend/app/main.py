@@ -15,24 +15,21 @@ _project_root = str(Path(__file__).resolve().parent.parent.parent)
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.database import init_db
-from app.errors import error_response, install_error_handlers
+from app.errors import install_error_handlers
+from app.observability import RequestContextMiddleware, configure_logging
 from app.routers import (
     auth_router, health_router, preview_router, query_router, sessions_router, upload_router,
 )
 
 # ---------------------------------------------------------------------------
-# Logging
+# Logging — text or JSON (LOG_FORMAT), every line tagged with the request id
 # ---------------------------------------------------------------------------
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    stream=sys.stdout,
-)
+configure_logging()
 logger = logging.getLogger("satquery")
 
 
@@ -70,7 +67,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="SatQuery AI",
     description="Satellite image analysis API (Qwen3-VL + RSUniVLM hybrid engine)",
-    version="2.0.0",
+    version="2.3.0",
     lifespan=lifespan,
 )
 
@@ -78,12 +75,16 @@ app = FastAPI(
 # CORS — explicit origins from CORS_ORIGINS, never "*" (API_CONTRACT.md §4)
 # ---------------------------------------------------------------------------
 install_error_handlers(app)
+# Request id, body-size limit, security headers and the catch-all 500 (app/observability.py).
+# Added before CORS so CORS stays outermost and its headers reach every response, errors included.
+app.add_middleware(RequestContextMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Request-ID", "Retry-After"],
 )
 
 # ---------------------------------------------------------------------------
@@ -105,18 +106,6 @@ async def root():
     """Redirect root to Swagger UI for easy browser access."""
     from fastapi.responses import RedirectResponse
     return RedirectResponse(url="/docs")
-
-
-# ---------------------------------------------------------------------------
-# Global exception handler — ensures no bare 500 without JSON body
-# (API_CONTRACT.md §1: "the backend must never let an unhandled exception
-# produce a bare 500 with no JSON body")
-# ---------------------------------------------------------------------------
-@app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception):
-    """Catch-all for any unhandled exception."""
-    logger.exception("Unhandled exception: %s", exc)
-    return error_response(500, "INTERNAL_ERROR", "An unexpected internal error occurred.", detail=str(exc))
 
 
 # ---------------------------------------------------------------------------

@@ -14,6 +14,7 @@ from ai_service.common.errors import AIServiceError
 from app.errors import error_response
 from app.models.api import ErrorResponse, QueryRequest, QueryResponse
 from app.orchestrator import QueryValidationError, process_query
+from app.ratelimit import QueryRateLimitDep
 from app.security import CurrentUser, DbSession
 
 logger = logging.getLogger(__name__)
@@ -30,11 +31,16 @@ _AI_STATUS = {"MODEL_INFERENCE_FAILED": 502, "INVALID_MODALITY_COMBINATION": 400
         400: {"model": ErrorResponse},
         401: {"model": ErrorResponse},
         404: {"model": ErrorResponse},
+        413: {"model": ErrorResponse},
+        429: {"model": ErrorResponse},
         502: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+        504: {"model": ErrorResponse},
         500: {"model": ErrorResponse},
     },
 )
-async def submit_query(request: QueryRequest, user: CurrentUser, db: DbSession) -> QueryResponse:
+async def submit_query(request: QueryRequest, user: CurrentUser, db: DbSession,
+                       _limit: QueryRateLimitDep = None) -> QueryResponse:
     """
     POST /api/v1/query — submit a natural-language query with 1–2 images.
 

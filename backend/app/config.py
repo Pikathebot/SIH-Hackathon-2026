@@ -49,6 +49,20 @@ class Settings(BaseSettings):
     cors_origins: str = Field(default="http://localhost:3000,http://127.0.0.1:3000", alias="CORS_ORIGINS")
     max_upload_mb: int = Field(default=4096, alias="MAX_UPLOAD_MB")
     backend_port: int = Field(default=8000, alias="BACKEND_PORT")
+    # JSON bodies (e.g. base64 images on /query); /upload is bounded by MAX_UPLOAD_MB instead
+    max_request_mb: int = Field(default=64, alias="MAX_REQUEST_MB")
+    # Total size of one user's uploads; 0 = unlimited
+    user_quota_mb: int = Field(default=20480, alias="USER_QUOTA_MB")
+
+    # ── Hardening (API_CONTRACT.md §6) ─────────────────────────────────
+    rate_limit_enabled: bool = Field(default=True, alias="RATE_LIMIT_ENABLED")
+    rate_limit_auth: str = Field(default="10/minute", alias="RATE_LIMIT_AUTH")    # per client IP
+    rate_limit_query: str = Field(default="30/minute", alias="RATE_LIMIT_QUERY")  # per user
+    gpu_concurrency: int = Field(default=1, ge=1, alias="GPU_CONCURRENCY")
+    gpu_queue_max: int = Field(default=4, ge=0, alias="GPU_QUEUE_MAX")
+    gpu_task_timeout_s: float = Field(default=300, gt=0, alias="GPU_TASK_TIMEOUT_S")
+    log_format: str = Field(default="text", alias="LOG_FORMAT")  # text | json
+    log_level: str = Field(default="INFO", alias="LOG_LEVEL")
 
     # ── AI service ─────────────────────────────────────────────────────
     ai_service_mode: str = Field(default="mock", alias="AI_SERVICE_MODE")

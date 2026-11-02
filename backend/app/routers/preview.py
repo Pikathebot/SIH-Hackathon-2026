@@ -13,12 +13,13 @@ import logging
 from typing import Optional
 from pydantic import BaseModel, Field
 from fastapi import APIRouter
-from fastapi.responses import JSONResponse
 from PIL import Image
 
 from app.geotiff import is_geotiff, process_geotiff
-from app.models.api import ErrorDetail, ErrorResponse, GeospatialMetadata
+from app.errors import error_response
+from app.models.api import ErrorResponse, GeospatialMetadata
 from app.orchestrator import _decode_image, QueryValidationError
+from app.ratelimit import QueryRateLimitDep
 from app.security import CurrentUser
 
 logger = logging.getLogger(__name__)
@@ -43,10 +44,12 @@ class PreviewResponse(BaseModel):
     response_model=PreviewResponse,
     responses={
         400: {"model": ErrorResponse},
+        413: {"model": ErrorResponse},
+        429: {"model": ErrorResponse},
         500: {"model": ErrorResponse},
     },
 )
-async def generate_preview(request: PreviewRequest, user: CurrentUser):
+async def generate_preview(request: PreviewRequest, user: CurrentUser, _limit: QueryRateLimitDep = None):
     """
     POST /api/v1/preview — generate a web-friendly PNG preview for any image/GeoTIFF.
     """
@@ -78,21 +81,7 @@ async def generate_preview(request: PreviewRequest, user: CurrentUser):
         )
 
     except QueryValidationError as exc:
-        return JSONResponse(
-            status_code=400,
-            content=ErrorResponse(
-                error=ErrorDetail(code=exc.code, message=exc.message, detail=exc.detail)
-            ).model_dump(),
-        )
-    except Exception as exc:
-        logger.exception("Failed to generate preview")
-        return JSONResponse(
-            status_code=500,
-            content=ErrorResponse(
-                error=ErrorDetail(
-                    code="INTERNAL_ERROR",
-                    message="Failed to generate image preview.",
-                    detail=str(exc),
-                )
-            ).model_dump(),
-        )
+        return error_response(400, exc.code, exc.message, exc.detail)
+    except Exception:
+        logger.exception("Failed to generate preview")  # traceback logged under the request id
+        return error_response(500, "INTERNAL_ERROR", "Failed to generate image preview.")

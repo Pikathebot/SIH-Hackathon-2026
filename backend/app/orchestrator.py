@@ -643,17 +643,19 @@ async def process_query(request: QueryRequest, user=None, db=None) -> QueryRespo
             primary_geo_meta = geo1
 
     # 5. Dispatch to AI function (sync functions → run in thread pool)
+    #    Through the GPU queue: one job at a time on the card, 503 when full, 504 on timeout.
     from ai_service.common.errors import AIServiceError
+    from app.gpu_queue import gpu_queue
     try:
-        result = await asyncio.to_thread(
-            _dispatch_ai_sync, task, request, decoded_images,
-        )
-    except AIServiceError:
-        raise  # Let the router handle it
+        result = await gpu_queue.run(_dispatch_ai_sync, task, request, decoded_images)
+    except (AIServiceError, ApiError):
+        raise  # Let the router / error handlers map it
     except Exception as exc:
+        # Exception text stays in the server log (with the request id), never in the response.
+        logger.exception("AI inference failed for task %s", task)
         raise AIServiceError(
             code="MODEL_INFERENCE_FAILED",
-            message=f"AI inference failed: {exc}",
+            message="The AI model failed to process this request.",
         ) from exc
 
     # 6. Assemble API response

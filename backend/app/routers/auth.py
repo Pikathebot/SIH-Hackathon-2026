@@ -15,6 +15,7 @@ from app.config import settings
 from app.errors import ApiError
 from app.models.api import AuthResponse, LoginRequest, RegisterRequest, UserOut
 from app.models.db import RefreshToken, User, utc_now
+from app.ratelimit import AuthRateLimit
 from app.security import (
     REFRESH_COOKIE,
     REFRESH_COOKIE_PATH,
@@ -56,7 +57,7 @@ def _clear_cookie(response: Response) -> None:
                            secure=settings.cookie_secure, samesite="lax")
 
 
-@router.post("/register", response_model=AuthResponse, status_code=201)
+@router.post("/register", dependencies=[AuthRateLimit], response_model=AuthResponse, status_code=201)
 async def register(body: RegisterRequest, response: Response, db: DbSession) -> AuthResponse:
     if not settings.allow_registration:
         raise ApiError(403, "FORBIDDEN", "Registration is disabled on this server.")
@@ -71,7 +72,7 @@ async def register(body: RegisterRequest, response: Response, db: DbSession) -> 
     return await _issue_tokens(db, user, response)
 
 
-@router.post("/login", response_model=AuthResponse)
+@router.post("/login", dependencies=[AuthRateLimit], response_model=AuthResponse)
 async def login(body: LoginRequest, response: Response, db: DbSession) -> AuthResponse:
     user = (await db.execute(select(User).where(User.email == body.email.strip().lower()))).scalar_one_or_none()
     if not verify_password(body.password, user.password_hash if user else None):
@@ -79,7 +80,7 @@ async def login(body: LoginRequest, response: Response, db: DbSession) -> AuthRe
     return await _issue_tokens(db, user, response)
 
 
-@router.post("/refresh", response_model=AuthResponse)
+@router.post("/refresh", dependencies=[AuthRateLimit], response_model=AuthResponse)
 async def refresh(response: Response, db: DbSession,
                   satquery_refresh: Optional[str] = Cookie(default=None)) -> AuthResponse:
     if not satquery_refresh:
