@@ -3,7 +3,7 @@
 [![ISRO Problem Statement](https://img.shields.io/badge/ISRO-Problem_Statement_26167-orange.svg)](docs/PROBLEM_STATEMENT.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.11](https://img.shields.io/badge/Python-3.11+-3776AB.svg?logo=python&logoColor=white)](https://python.org)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-009688.svg?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-009688.svg?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![React 18](https://img.shields.io/badge/React-18.3-61DAFB.svg?logo=react&logoColor=black)](https://reactjs.org)
 [![Vite](https://img.shields.io/badge/Vite-6.0-646CFF.svg?logo=vite&logoColor=white)](https://vitejs.dev)
 [![TailwindCSS](https://img.shields.io/badge/TailwindCSS-3.4-38B2AC.svg?logo=tailwindcss&logoColor=white)](https://tailwindcss.com)
@@ -21,10 +21,10 @@
 - [Repository Structure](#-repository-structure)
 - [Quick Start Guide](#-quick-start-guide)
   - [Prerequisites](#prerequisites)
-  - [1. Clone Repository & Setup Environment](#1-clone-repository--setup-environment)
-  - [2. Backend Setup (FastAPI)](#2-backend-setup-fastapi)
-  - [3. Frontend Setup (React + Vite)](#3-frontend-setup-react--vite)
-  - [4. Single-Command Docker Deployment](#4-single-command-docker-deployment)
+  - [1. Clone and configure](#1-clone-and-configure)
+  - [2. Native run](#2-native-run-fastest-dev-loop)
+  - [3. Docker](#3-docker)
+  - [Engines](#engines)
 - [Evaluation Datasets & Query Guide](#-evaluation-datasets--query-guide)
 - [Automated Testing & Verification](#-automated-testing--verification)
 - [API Specification](#-api-specification)
@@ -181,75 +181,54 @@ SIH-Hackathon-2026/
 
 ## 🚀 Quick Start Guide
 
+Full details, including troubleshooting, are in [QUICKSTART.md](QUICKSTART.md). Cloud and shared deployments are covered in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+
 ### Prerequisites
-- **Python**: `3.11+`
-- **Node.js**: `18+` and `npm`
-- **Docker & Docker Compose** (optional for containerized deployment)
-- **GPU (Optional)**: NVIDIA GPU with CUDA 12+ (only required if running real RSUniVLM deep learning weights; all development and testing run smoothly on CPU via contract-conformant mocks).
+- **Python 3.11** and [uv](https://docs.astral.sh/uv/). Plain `pip` works too.
+- **Node.js 22 LTS** and `npm`
+- **For real inference:** an NVIDIA GPU with ≥12 GB VRAM and a driver for CUDA 12.8+. The code was developed on an RTX 5070. It also needs the model files described in QUICKSTART §1. **Mock mode needs no GPU and no models.**
+- **Docker Desktop** (optional). Use the **WSL 2 engine** for GPU containers.
 
----
-
-### 1. Clone Repository & Setup Environment
+### 1. Clone and configure
 
 ```bash
 git clone https://github.com/Pikathebot/SIH-Hackathon-2026.git
 cd SIH-Hackathon-2026
-
-# Copy environment variables template
-cp .env.example .env
+cp .env.example .env          # AI_SERVICE_MODE=mock by default
 ```
 
----
+### 2. Native run (fastest dev loop)
 
-### 2. Backend Setup (FastAPI)
+```powershell
+uv venv --python 3.11 .venv
+uv pip install -r backend/requirements.lock                 # mock / backend only
+# or the full GPU stack (torch cu128, RSUniVLM, Qwen client):
+uv pip install -r requirements.lock --extra-index-url https://download.pytorch.org/whl/cu128 --index-strategy unsafe-best-match
+
+.\start_dev.ps1    # backend :8000 (reload) + frontend :3000, and llama-server :8080 for the real hybrid engine
+```
+
+Open `http://localhost:3000` and create an account. Accounts, sessions and uploads persist in `backend/data/`.
+
+### 3. Docker
 
 ```bash
-# Create and activate a Python virtual environment
-python -m venv .venv
+# Full GPU stack: llama.cpp (Qwen3-VL) + backend (hybrid engine) + nginx frontend
+docker compose up --build                                   # -> http://localhost:3000
 
-# On Linux / macOS:
-source .venv/bin/activate
-# On Windows (PowerShell):
-.\.venv\Scripts\Activate.ps1
-
-# Install backend dependencies
-pip install -r backend/requirements.txt
-
-# Start backend in mock mode (Instant startup, full UI features)
-export AI_SERVICE_MODE=mock
-uvicorn backend.app.main:app --host 0.0.0.0 --port 8000 --reload
+# No GPU: slim backend with the mock engine
+docker compose -f docker-compose.yml -f docker-compose.cpu.yml up --build
 ```
 
-The backend server will start at `http://localhost:8000`.  
-API documentation is available at `http://localhost:8000/docs`.
+### Engines
 
----
+| `AI_ENGINE` | What answers | Needs |
+|---|---|---|
+| `hybrid` *(default)* | Qwen3-VL-8B (llama.cpp) for VQA, captions, boxes and change. RSUniVLM for `[SEG]` pixel masks | llama-server + RSUniVLM weights, ~11.8 GB VRAM peak |
+| `qwen` | Qwen3-VL for everything. Masks come from its polygon output | llama-server only |
+| `rsunivlm` | RSUniVLM for everything | RSUniVLM weights |
 
-### 3. Frontend Setup (React + Vite)
-
-In a separate terminal window:
-
-```bash
-cd frontend
-
-# Install Node.js dependencies
-npm install
-
-# Start Vite development server
-npm run dev
-```
-
-The frontend dashboard will be available at `http://localhost:3000` (or `http://localhost:5173`).
-
----
-
-### 4. Single-Command Docker Deployment
-
-You can run both backend and frontend services containerized with a single command:
-
-```bash
-docker-compose up --build
-```
+If llama-server is unreachable at startup, `hybrid` falls back to `rsunivlm`. `AI_SERVICE_MODE=mock` swaps every engine for contract-conformant stand-ins.
 
 ---
 
@@ -270,22 +249,24 @@ Pre-configured sample rasters are provided in [`sample_data/`](sample_data/READM
 
 ## 🧪 Automated Testing & Verification
 
-SatQuery AI includes a test suite verifying contract conformance, unit functionality, and end-to-end integration:
-
 ```bash
-# 1. Run full AI Service & Contract Conformance test suite (59 tests)
-pytest ai_service/common ai_service/rsunivlm/tests ai_service/fusion/tests -v
+# Whole suite in mock mode, which is what CI runs (bare `pytest` would collect vendor/llava)
+python -m pytest ai_service/common ai_service/rsunivlm/tests ai_service/fusion/tests ai_service/qwen_vl/tests backend/tests
 
-# 2. Run Backend & GeoTIFF Integration test suite (34 tests)
-pytest backend/tests -v
-
-# 3. Run Interactive End-to-End Smoke Test Suite
+# End-to-end scenarios against a running server (native :8000 or Docker :3000)
 python smoke_test.py --url http://localhost:8000
+
+# Lint (same rules as CI and pre-commit)
+ruff check .
 ```
+
+CI (`.github/workflows/ci.yml`) runs lint, the test suite on the slim lock, the frontend type-check, build and audit, and the Docker builds. It finishes with a smoke test of the CPU compose stack.
 
 ---
 
 ## 📡 API Specification
+
+The authoritative reference is [`docs/API_CONTRACT.md`](docs/API_CONTRACT.md) (v2.3.0). Interactive docs are at `http://localhost:8000/docs`. Every endpoint except `/health`, `/ready` and the `/auth/*` sign-in routes needs `Authorization: Bearer <access_token>` from `POST /api/v1/auth/register` or `/auth/login`. Errors always use the shape `{"error": {"code", "message", "detail", "request_id"}}`.
 
 ### `POST /api/v1/query`
 Main vision-language analysis endpoint. Accepts single or multi-image payloads with natural language queries.
@@ -345,7 +326,8 @@ SatQuery AI adheres to strict contract-first principles documented in [`docs/`](
 - **`docs/CONTRACT.md`**: Global naming conventions, canonical enum types, and module ownership.
 - **`docs/API_CONTRACT.md`**: REST API endpoints, schemas, and standardized HTTP error codes.
 - **`docs/AI_SERVICE_CONTRACT.md`**: Strict `TypedDict` shapes and mode-routing specifications for all AI functions.
-- **`docs/DATABASE_CONTRACT.md`**: SQLite persistence schema and query logging specifications.
+- **`docs/DATABASE_CONTRACT.md`**: Persistence schema (SQLite by default, Postgres via `DATABASE_URL`) and Alembic migrations.
+- **`docs/DEPLOYMENT.md`**: Docker, GPU and cloud deployment.
 
 ---
 
