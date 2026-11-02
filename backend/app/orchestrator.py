@@ -296,11 +296,21 @@ def _decode_image(url_or_base64: str) -> Tuple[Image.Image, Optional[GeoMetadata
         _, _, data = data.partition(",")
     try:
         image_bytes = base64.b64decode(data, validate=False)
-        return _decode_bytes(image_bytes)
-    except QueryValidationError:
-        raise
-    except Exception:
-        pass
+    except (ValueError, TypeError):
+        image_bytes = None
+    if image_bytes is not None:
+        try:
+            return _decode_bytes(image_bytes)
+        except QueryValidationError:
+            raise
+        except (ImportError, OSError) as exc:
+            # A missing native library (e.g. rasterio's libexpat) is a server fault, not bad input
+            if isinstance(exc, ImportError) or "cannot open shared object" in str(exc):
+                logger.exception("Image decoder unavailable")
+                raise
+            logger.warning("Image decode failed: %s", exc)
+        except Exception as exc:
+            logger.warning("Image decode failed: %s", exc)
 
     raise QueryValidationError(
         code="UNSUPPORTED_FORMAT",

@@ -1,0 +1,17 @@
+# pip install pre-commit && pre-commit install
+# Same ruff version and rules (ruff.toml) as CI.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.17.3
+    hooks:
+      - id: ruff
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-yaml
+        args: [--unsafe]  # compose files use !reset / !override tags
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=2048]  # model weights and GeoTIFF scenes belong outside git
+        exclude: ^(frontend/package-lock\.json|sample_data/)
+      - id: detect-private-key
