@@ -238,7 +238,10 @@ const WorkspaceMain: React.FC = () => {
       const images = await Promise.all(
         preset.samples.map(async (s, i): Promise<QueryImage> => {
           const res = await fetch(`${SAMPLES_BASE}${s.file}`);
-          if (!res.ok) throw new Error(`Sample image ${s.file} is missing (HTTP ${res.status}).`);
+          // A missing static file comes back as the SPA's index.html with 200, so check the type too.
+          if (!res.ok || (res.headers.get('content-type') || '').includes('text/html')) {
+            throw new Error(`Sample image ${s.file} is missing. Run scripts/build_demo_samples.py.`);
+          }
           const blob = await res.blob();
           const up = await uploadLargeImage(new File([blob], s.file, { type: blob.type || 'image/tiff' }));
           return {

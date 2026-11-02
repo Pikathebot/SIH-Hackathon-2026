@@ -51,9 +51,9 @@ export const DEMO_PRESETS: DemoPreset[] = [
     title: 'Object & Facility Localization',
     task: 'detection',
     category: 'Target Finding',
-    query: 'Locate all aircraft on the airbase.',
+    query: 'Locate all ships in the harbour.',
     description: 'Find and pinpoint specific objects with bounding boxes and map coordinates.',
-    samples: [{ file: 'optical_airbase_runway.tif', modality: 'optical' }],
+    samples: [{ file: 'optical_port_rotterdam.tif', modality: 'optical' }],
   },
   {
     id: 'preset-seg',
