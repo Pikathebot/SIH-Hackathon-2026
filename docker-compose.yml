@@ -6,7 +6,7 @@ services:
       context: .
       dockerfile: backend/Dockerfile
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"  # loopback only: the backend trusts X-Forwarded-For
     env_file:
       - .env
     volumes:

@@ -31,6 +31,9 @@ COPY backend/ ./backend/
 RUN mkdir -p backend/data/images
 
 ENV PYTHONPATH="/app:/app/backend"
+# Trust X-Forwarded-For from the nginx frontend container, so per-IP rate limits see the real
+# client. Safe only while port 8000 is not reachable from outside (compose binds it to 127.0.0.1).
+ENV FORWARDED_ALLOW_IPS="*"
 
 # Expose the backend port
 EXPOSE 8000
