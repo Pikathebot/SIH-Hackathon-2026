@@ -267,6 +267,10 @@ Every endpoint requires `Authorization: Bearer <access_token>`, except `GET /hea
 
 `GET /assets/{asset_id}` returns the original file. Only the owner can fetch it; anyone else gets `404`.
 
+`DELETE /assets/{asset_id}` *(v2.3.0)* permanently deletes an owned asset: the stored file, its preview and its record. It returns `204`, or `404` if the asset is not the caller's. History entries that used the asset stay. Their `images[].asset_id` still lists the id, but `/assets/{id}` and `/preview` now return `404`, so the frontend shows the entry without a thumbnail.
+
+`GET /storage` *(v2.3.0)* returns the caller's usage: `{"used_bytes": 123, "quota_bytes": 21474836480, "asset_count": 4}`. `quota_bytes` is `null` when `USER_QUOTA_MB=0`. Usage covers uploads and the images saved from inline (base64/URL) queries. Deleting a session does not free it, because a session's images stay as the user's assets.
+
 `GET /assets/{asset_id}/preview` *(v2.1.0)* returns a browser-renderable `image/png` preview of the asset, at most 1024 px on its longest side, with the same radiometric normalisation as `/upload`. Only the owner can fetch it; anyone else gets `404`. The frontend uses it to show images from history, including GeoTIFF and JPEG 2000 uploads that browsers cannot display.
 
 `POST /preview` keeps the same body and response. It now requires authentication and follows the same URL rules as `/query`.
@@ -276,7 +280,7 @@ Every endpoint requires `Authorization: Bearer <access_token>`, except `GET /hea
 ## 6. Limits, queueing and tracing *(v2.3.0, additive)*
 
 - **Request IDs.** Every response carries an `X-Request-ID` header. If the client sends a valid `X-Request-ID` (1–64 characters from `[A-Za-z0-9._-]`), the server reuses it. Otherwise it generates one. Error bodies repeat it as `error.request_id`.
-- **Rate limits.** `POST /auth/register`, `/auth/login` and `/auth/refresh` are limited per client IP (`RATE_LIMIT_AUTH`, default `10/minute`). `POST /query` and `/preview` are limited per user (`RATE_LIMIT_QUERY`, default `30/minute`). Exceeding a limit returns `429 RATE_LIMITED` with a `Retry-After` header in seconds.
+- **Rate limits.** `POST /auth/register`, `/auth/login` and `/auth/refresh` are each limited per client IP (`RATE_LIMIT_AUTH`, default `10/minute` per endpoint), so failed logins never block a token refresh. The frontend treats only `401`/`403` from `/auth/refresh` as signed out. A `429` or `5xx` there is a transient error. `POST /query` and `/preview` are limited per user (`RATE_LIMIT_QUERY`, default `30/minute`). Exceeding a limit returns `429 RATE_LIMITED` with a `Retry-After` header in seconds.
 - **Request body size.** JSON request bodies larger than `MAX_REQUEST_MB` (default 64) return `413 PAYLOAD_TOO_LARGE`. `POST /upload` is bounded by `MAX_UPLOAD_MB` instead.
 - **GPU queue.** Model inference runs at most `GPU_CONCURRENCY` (default 1) jobs at a time, with up to `GPU_QUEUE_MAX` (default 4) more waiting. A query that arrives when the queue is full returns `503 QUEUE_FULL` with a `Retry-After` header. A job that runs longer than `GPU_TASK_TIMEOUT_S` (default 300) returns `504 INFERENCE_TIMEOUT`. The frontend should show these messages and let the user retry. Its loading-state rule in §3 still applies, because a queued query can wait behind other users' jobs.
-- **Storage quota.** `USER_QUOTA_MB` (default 20480, `0` = unlimited) caps the total size of each user's uploads. See *Uploads and assets* in §5.
+- **Storage quota.** `USER_QUOTA_MB` (default 20480, `0` = unlimited) caps the total size of each user's stored images (uploads plus images saved from inline queries). An upload that would pass it returns `413 QUOTA_EXCEEDED`. Inline queries are not refused, but their images count toward usage. `GET /storage` reports usage and `DELETE /assets/{id}` frees space. See *Uploads and assets* in §5.
