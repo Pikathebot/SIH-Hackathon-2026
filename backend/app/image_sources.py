@@ -79,7 +79,8 @@ async def resolve_owned_asset(db: AsyncSession, user_id: str, asset_id: str) -> 
 # ---------------------------------------------------------------------------
 # Remote URLs
 # ---------------------------------------------------------------------------
-def _assert_public_host(url: str) -> None:
+def _resolve_public(url: str) -> tuple[str, str]:
+    """Resolve the URL's host once; every address must be public. Returns (hostname, pinned ip)."""
     parts = urlsplit(url)
     if parts.scheme not in ("http", "https") or not parts.hostname:
         raise UnsafeUrlError("Only http(s) URLs are supported.")
@@ -88,18 +89,39 @@ def _assert_public_host(url: str) -> None:
                                    type=socket.SOCK_STREAM)
     except socket.gaierror as exc:
         raise UnsafeUrlError(f"Could not resolve host '{parts.hostname}'.") from exc
-    for info in infos:
-        ip = ipaddress.ip_address(info[4][0].split("%")[0])
+    ips = [ipaddress.ip_address(info[4][0].split("%")[0]) for info in infos]
+    if not ips:
+        raise UnsafeUrlError(f"Could not resolve host '{parts.hostname}'.")
+    for ip in ips:
         if not ip.is_global or ip.is_multicast:
             raise UnsafeUrlError("URLs pointing at local or private network addresses are not allowed.")
+    return parts.hostname, str(ips[0])
 
 
-def fetch_public_url(url: str, max_bytes: int, timeout: float = 30.0) -> bytes:
-    """Download a URL that resolves only to public addresses, capped at max_bytes."""
-    with httpx.Client(timeout=timeout, follow_redirects=False) as client:
+def _pinned_request(url: str, ip: str) -> tuple[str, dict, dict]:
+    """Rewrite the URL to connect to the already-validated IP (no second DNS lookup, so a
+    rebinding DNS server cannot swap in a private address), keeping the real Host header
+    and TLS server name so virtual hosting and certificate checks still use the hostname."""
+    parts = urlsplit(url)
+    host_ip = f"[{ip}]" if ":" in ip else ip
+    netloc = host_ip + (f":{parts.port}" if parts.port else "")
+    pinned = parts._replace(netloc=netloc).geturl()
+    host_header = parts.hostname + (f":{parts.port}" if parts.port else "")
+    extensions = {"sni_hostname": parts.hostname} if parts.scheme == "https" else {}
+    return pinned, {"Host": host_header}, extensions
+
+
+def fetch_public_url(url: str, max_bytes: int, timeout: float = 30.0,
+                     transport: Optional[httpx.BaseTransport] = None) -> bytes:
+    """Download a URL that resolves only to public addresses, capped at max_bytes.
+    Each hop (including redirects) is resolved once, checked, and connected to by that IP."""
+    with httpx.Client(timeout=timeout, follow_redirects=False, transport=transport) as client:
         for _ in range(_MAX_REDIRECTS + 1):
-            _assert_public_host(url)
-            with client.stream("GET", url) as resp:
+            _, ip = _resolve_public(url)
+            pinned, headers, extensions = _pinned_request(url, ip)
+            request = client.build_request("GET", pinned, headers=headers, extensions=extensions)
+            resp = client.send(request, stream=True)
+            try:
                 if resp.is_redirect:
                     url = urljoin(url, resp.headers.get("location", ""))
                     continue
@@ -110,4 +132,6 @@ def fetch_public_url(url: str, max_bytes: int, timeout: float = 30.0) -> bytes:
                     if len(buf) > max_bytes:
                         raise UnsafeUrlError(f"Remote image is larger than {max_bytes // (1024 * 1024)} MB.")
                 return bytes(buf)
+            finally:
+                resp.close()
     raise UnsafeUrlError("Too many redirects.")
