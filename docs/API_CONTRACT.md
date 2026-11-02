@@ -1,6 +1,6 @@
 # API_CONTRACT.md — Frontend ↔ Backend HTTP Contract
 
-**Version:** 2.2.0 (2.2.0 adds `HistoryEntry.images`; 2.1.0 adds `GET /assets/{asset_id}/preview`; 2.0.0 made `/query`, `/upload`, `/assets` and `/preview` require authentication; see §5)
+**Version:** 2.3.0 (2.3.0 adds request IDs, rate limits, the GPU queue errors, `GET /ready` and per-user storage quotas; see §6. 2.2.0 adds `HistoryEntry.images`; 2.1.0 adds `GET /assets/{asset_id}/preview`; 2.0.0 made `/query`, `/upload`, `/assets` and `/preview` require authentication; see §5)
 **Base URL (local dev):** `http://localhost:8000`
 **Consumers:** `frontend/` (Person 4)
 **Producers:** `backend/` (Person 3)
@@ -86,9 +86,10 @@ Field notes:
 ```json
 {
   "error": {
-    "code": "INVALID_IMAGE_COUNT | INVALID_MODALITY_COMBINATION | UNSUPPORTED_FORMAT | MODEL_INFERENCE_FAILED | INTERNAL_ERROR | UNAUTHORIZED | FORBIDDEN | NOT_FOUND | CONFLICT | VALIDATION_ERROR | PAYLOAD_TOO_LARGE",
+    "code": "INVALID_IMAGE_COUNT | INVALID_MODALITY_COMBINATION | UNSUPPORTED_FORMAT | MODEL_INFERENCE_FAILED | INTERNAL_ERROR | UNAUTHORIZED | FORBIDDEN | NOT_FOUND | CONFLICT | VALIDATION_ERROR | PAYLOAD_TOO_LARGE | RATE_LIMITED | QUEUE_FULL | INFERENCE_TIMEOUT | QUOTA_EXCEEDED",
     "message": "human-readable string safe to display to the user",
-    "detail": "optional string, technical detail for logs — frontend should not display this to end users"
+    "detail": "optional string, technical detail for logs — frontend should not display this to end users",
+    "request_id": "optional string (v2.3.0), the X-Request-ID of this request"
   }
 }
 ```
@@ -107,8 +108,14 @@ Status code mapping:
 | `CONFLICT` *(v2.0.0)* | 409 |
 | `VALIDATION_ERROR` *(v2.0.0)* | 422 |
 | `PAYLOAD_TOO_LARGE` *(v2.0.0)* | 413 |
+| `QUOTA_EXCEEDED` *(v2.3.0)* | 413 |
+| `RATE_LIMITED` *(v2.3.0)* | 429 |
+| `QUEUE_FULL` *(v2.3.0)* | 503 |
+| `INFERENCE_TIMEOUT` *(v2.3.0)* | 504 |
 
 The backend must **never** let an unhandled exception produce a bare 500 with no JSON body — every error path returns this shape. This matters because the frontend's error-handling code is written once against this contract and should never need a try/catch around JSON parsing itself.
+
+*(v2.3.0)* `INTERNAL_ERROR` responses never carry exception text or stack traces in `message` or `detail`. They carry `request_id`, and the server logs the full traceback under that id. See §6 for the other v2.3.0 codes.
 
 ### `GET /api/v1/health`
 
@@ -120,6 +127,12 @@ Trivial liveness check for local dev / demo rehearsal, no auth.
 ```
 
 *(v1.2.0, additive)* The response also includes an optional `engine` object, for example `{"engine": "hybrid", "mode": "real", "notes": [], "vlm_server": "http://127.0.0.1:8080", "vlm_model": "qwen3-vl-8b", "vlm_available": true}`. The `vlm_*` keys are present only for the `qwen` and `hybrid` engines in real mode.
+
+*(v2.3.0, additive)* The response also includes `database` (bool, whether a trivial query succeeds), `queue` (`{"running": 0, "waiting": 0, "concurrency": 1, "max_waiting": 4}`) and `gpu` (`{"name": "...", "memory_used_mb": 0, "memory_total_mb": 0}`, or `null` when no CUDA device is in use). `status` stays `"ok"` while the process is alive, even if a dependency is down. Use `/ready` to gate traffic.
+
+### `GET /api/v1/ready` *(v2.3.0)*
+
+Readiness probe, no auth. Returns `200 {"status": "ready", "checks": {"database": true, "engine": true}}` when the database answers and the AI engine has been initialised. Otherwise it returns `503` with `"status": "not_ready"` and the same `checks` object.
 
 ---
 
@@ -245,7 +258,7 @@ Every endpoint requires `Authorization: Bearer <access_token>`, except `GET /hea
 
 ### Uploads and assets
 
-`POST /upload` takes `multipart/form-data` with one `file` field. Accepted types are GeoTIFF, JPEG 2000, PNG and JPEG. The type is checked from the file's magic bytes, not its extension. A file larger than `MAX_UPLOAD_MB` returns `413 PAYLOAD_TOO_LARGE`. Any other type returns `400 UNSUPPORTED_FORMAT`. A successful upload returns `200`:
+`POST /upload` takes `multipart/form-data` with one `file` field. Accepted types are GeoTIFF, JPEG 2000, PNG and JPEG. The type is checked from the file's magic bytes, not its extension. A file larger than `MAX_UPLOAD_MB` returns `413 PAYLOAD_TOO_LARGE`. *(v2.3.0)* An upload that would take the user's total stored uploads past `USER_QUOTA_MB` returns `413 QUOTA_EXCEEDED`. Any other type returns `400 UNSUPPORTED_FORMAT`. A successful upload returns `200`:
 ```json
 { "asset_id": "uuid", "filename": "scene.tif", "url": "/api/v1/assets/<asset_id>",
   "preview_base64": "data:image/png;base64,...", "format": "geotiff | standard",
@@ -257,3 +270,13 @@ Every endpoint requires `Authorization: Bearer <access_token>`, except `GET /hea
 `GET /assets/{asset_id}/preview` *(v2.1.0)* returns a browser-renderable `image/png` preview of the asset, at most 1024 px on its longest side, with the same radiometric normalisation as `/upload`. Only the owner can fetch it; anyone else gets `404`. The frontend uses it to show images from history, including GeoTIFF and JPEG 2000 uploads that browsers cannot display.
 
 `POST /preview` keeps the same body and response. It now requires authentication and follows the same URL rules as `/query`.
+
+---
+
+## 6. Limits, queueing and tracing *(v2.3.0, additive)*
+
+- **Request IDs.** Every response carries an `X-Request-ID` header. If the client sends a valid `X-Request-ID` (1–64 characters from `[A-Za-z0-9._-]`), the server reuses it. Otherwise it generates one. Error bodies repeat it as `error.request_id`.
+- **Rate limits.** `POST /auth/register`, `/auth/login` and `/auth/refresh` are limited per client IP (`RATE_LIMIT_AUTH`, default `10/minute`). `POST /query` and `/preview` are limited per user (`RATE_LIMIT_QUERY`, default `30/minute`). Exceeding a limit returns `429 RATE_LIMITED` with a `Retry-After` header in seconds.
+- **Request body size.** JSON request bodies larger than `MAX_REQUEST_MB` (default 64) return `413 PAYLOAD_TOO_LARGE`. `POST /upload` is bounded by `MAX_UPLOAD_MB` instead.
+- **GPU queue.** Model inference runs at most `GPU_CONCURRENCY` (default 1) jobs at a time, with up to `GPU_QUEUE_MAX` (default 4) more waiting. A query that arrives when the queue is full returns `503 QUEUE_FULL` with a `Retry-After` header. A job that runs longer than `GPU_TASK_TIMEOUT_S` (default 300) returns `504 INFERENCE_TIMEOUT`. The frontend should show these messages and let the user retry. Its loading-state rule in §3 still applies, because a queued query can wait behind other users' jobs.
+- **Storage quota.** `USER_QUOTA_MB` (default 20480, `0` = unlimited) caps the total size of each user's uploads. See *Uploads and assets* in §5.

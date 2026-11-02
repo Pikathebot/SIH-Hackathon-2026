@@ -1,6 +1,6 @@
 # INTEGRATION_GUIDE.md — Working in Parallel Without Breaking Each Other
 
-**Version:** 1.0.0
+**Version:** 1.1.0
 
 This doc is the practical "how do I not block on someone else's unfinished module" guide. Read this before writing any code, alongside the relevant contract file for your module.
 
@@ -54,8 +54,21 @@ RSUNIVLM_LORA_ADAPTER_PATH=./ai_service/rsunivlm/checkpoints/lora_adapter
 FUSION_MODEL_PATH=./ai_service/fusion/checkpoints/classifier.pkl
 BACKEND_PORT=8000
 FRONTEND_PORT=3000
-DATABASE_PATH=./backend/data/satquery.db
+DATA_DIR=./backend/data      # database (unless DATABASE_URL is set), uploads, evidence
+# v1.1.0 — limits & hardening (API_CONTRACT.md §6)
+MAX_UPLOAD_MB=4096
+MAX_REQUEST_MB=64
+USER_QUOTA_MB=20480
+RATE_LIMIT_ENABLED=true
+RATE_LIMIT_AUTH=10/minute
+RATE_LIMIT_QUERY=30/minute
+GPU_CONCURRENCY=1
+GPU_QUEUE_MAX=4
+GPU_TASK_TIMEOUT_S=300
+LOG_FORMAT=json              # json | text
 ```
+
+`.env.example` at the repo root is the full, commented list.
 
 Nobody hardcodes a path, port, or checkpoint location in application code — everything reads from these variables. This is what lets `AI_SERVICE_MODE` swap mock↔real without touching call sites.
 
