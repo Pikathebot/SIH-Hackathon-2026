@@ -107,6 +107,8 @@ def run_fusion(
         # High backscatter (> 0.60): Double-bounce corner reflectors (built-up, concrete, metal)
         # Low backscatter (< 0.20): Specular reflection (calm water bodies, smooth river surfaces)
         # Medium backscatter (0.20 - 0.60): Diffuse volume scattering (vegetation canopy roughness)
+        # Median filter suppresses speckle before thresholding
+        sar_np = cv2.medianBlur((sar_np * 255).astype(np.uint8), 5).astype(np.float32) / 255.0
         sar_high_backscatter = sar_np > 0.60
         sar_specular_water = sar_np < 0.20
         sar_volume_veg = (sar_np >= 0.20) & (sar_np <= 0.60)
@@ -137,6 +139,21 @@ def run_fusion(
 
         # Fused Vegetation: optical greenness / NIR brightness confirmed by SAR roughness
         fused_veg = ((opt_veg_mask & sar_volume_veg) | (green_index > 0.12) | (opt_veg_mask & (sar_np < 0.60))) & ~fused_water
+
+        # Cloud: bright, colourless optical pixels. Optical bands cannot see through it, so
+        # there the radar decides water: calm water is specular (near-zero backscatter)
+        # whatever the sky looks like. Other clouded pixels stay built-up, since speckled
+        # SAR alone does not separate vegetation from structures reliably.
+        if is_opt_grayscale:
+            cloud = np.zeros_like(fused_water)
+        else:
+            saturation = opt_np.max(axis=2) - opt_np.min(axis=2)
+            cloud = (brightness > 0.70) & (saturation < 0.20) & ~opt_veg_mask
+            cloud = cv2.morphologyEx(cloud.astype(np.uint8), cv2.MORPH_OPEN, kernel).astype(bool)
+        fused_water = (fused_water & ~cloud) | (cloud & sar_specular_water)
+        fused_veg = fused_veg & ~cloud
+        cloud_pct = float(np.mean(cloud) * 100)
+
         # Built-up: SAR double bounce OR high optical structural texture
         fused_urban = (sar_high_backscatter | (~fused_water & ~fused_veg)) & ~fused_water
 
@@ -162,8 +179,10 @@ def run_fusion(
             f"{final_urban_pct:.1f}% Built-up infrastructure, "
             f"{final_veg_pct:.1f}% Vegetation canopy, and "
             f"{final_water_pct:.1f}% Water bodies. "
-            f"Optical spectral indices resolved chlorophyll absorption and water boundaries, "
-            f"while SAR microwave backscatter penetrated surface reflectance to validate dielectric structure."
+            + (f"{cloud_pct:.1f}% of the optical image is cloud-covered; water beneath it was "
+               f"identified from the SAR backscatter, which is unaffected by cloud. " if cloud_pct >= 1.0 else "")
+            + "Optical spectral indices resolved vegetation and water boundaries in clear areas, "
+            "and SAR backscatter confirmed water (specular) and built-up (double-bounce) surfaces."
         )
 
         elapsed_ms = int((time.time() - start_time) * 1000)
@@ -181,6 +200,7 @@ def run_fusion(
                     "vegetation_coverage_pct": float(round(final_veg_pct, 1)),
                     "water_coverage_pct": float(round(final_water_pct, 1)),
                     "sensor_concordance": float(round(sensor_agreement, 3)),
+                    "cloud_cover_pct": float(round(cloud_pct, 1)),
                     "confidence_source": "spectral_sar_margin",
                 },
                 "latency_ms": elapsed_ms,

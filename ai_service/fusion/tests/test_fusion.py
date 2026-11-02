@@ -122,3 +122,35 @@ class TestOpticalSARFusion:
         with pytest.raises(AIServiceError) as exc:
             run_fusion(optical_image, opt2, "fusion query")
         assert exc.value.code == INVALID_MODALITY_COMBINATION
+
+
+# ── cloud: radar decides water where optical sees only cloud ──────────────
+CLOUD, CLEAR_WATER = (235, 235, 240), (20, 50, 140)
+
+
+def _fuse(left_rgb, right_rgb, sar_val):
+    """Optical: left half one colour, right half another (a colour scene, not single-band)."""
+    from ai_service.fusion.wrapper import run_fusion
+    opt = Image.new("RGB", (128, 128), left_rgb)
+    opt.paste(Image.new("RGB", (64, 128), right_rgb), (64, 0))
+    sar = Image.new("L", (128, 128), sar_val)
+    return run_fusion(opt, sar, "Classify land cover under the clouds.")
+
+
+def test_cloud_over_calm_water_is_water():
+    r = _fuse(CLOUD, CLEAR_WATER, 8)  # specular (dark) SAR everywhere
+    p = r["meta"]["parameters"]
+    assert 40 < p["cloud_cover_pct"] < 60
+    assert p["water_coverage_pct"] > 95
+    assert "cloud-covered" in r["answer"]
+
+
+def test_cloud_over_strong_scatterers_is_not_water():
+    p = _fuse(CLOUD, (200, 60, 50), 220)["meta"]["parameters"]  # double-bounce returns
+    assert p["water_coverage_pct"] < 5 and p["urban_coverage_pct"] > 90
+
+
+def test_clear_scene_reports_no_cloud():
+    r = _fuse(CLEAR_WATER, (40, 140, 40), 8)
+    assert r["meta"]["parameters"]["cloud_cover_pct"] == 0
+    assert "cloud-covered" not in r["answer"]
