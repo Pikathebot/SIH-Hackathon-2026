@@ -181,7 +181,7 @@ SIH-Hackathon-2026/
 
 ## 🚀 Quick Start Guide
 
-Full details, including troubleshooting, are in [QUICKSTART.md](QUICKSTART.md). Cloud and shared deployments are covered in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+Full details, including troubleshooting, are in [QUICKSTART.md](QUICKSTART.md). For a live presentation, follow [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md). Cloud and shared deployments are covered in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 ### Prerequisites
 - **Python 3.11** and [uv](https://docs.astral.sh/uv/). Plain `pip` works too.
