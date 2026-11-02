@@ -35,6 +35,21 @@ async def _database_ok() -> bool:
         return False
 
 
+def _nvml_memory():
+    """Device-wide (all processes) memory via NVML, or None. torch.cuda.mem_get_info under-reports
+    on Windows/WDDM (5 GB vs 11.7 GB measured), so it is not used for this number."""
+    try:
+        import pynvml  # nvidia-ml-py, GPU requirements only
+        pynvml.nvmlInit()
+        try:
+            mem = pynvml.nvmlDeviceGetMemoryInfo(pynvml.nvmlDeviceGetHandleByIndex(0))
+            return round(mem.used / 2**20), round(mem.total / 2**20)
+        finally:
+            pynvml.nvmlShutdown()
+    except Exception:
+        return None
+
+
 def _gpu_info():
     """CUDA usage if torch is already loaded by an engine; never imports torch itself (mock mode)."""
     torch = sys.modules.get("torch")
@@ -43,10 +58,11 @@ def _gpu_info():
     try:
         if not torch.cuda.is_available():
             return None
-        free, total = torch.cuda.mem_get_info()
+        nvml = _nvml_memory()
         return {"name": torch.cuda.get_device_name(0),
-                "memory_used_mb": round((total - free) / 2**20),
-                "memory_total_mb": round(total / 2**20)}
+                "memory_used_mb": nvml[0] if nvml else None,
+                "memory_total_mb": nvml[1] if nvml else round(torch.cuda.get_device_properties(0).total_memory / 2**20),
+                "process_reserved_mb": round(torch.cuda.memory_reserved() / 2**20)}
     except Exception:
         return None
 
