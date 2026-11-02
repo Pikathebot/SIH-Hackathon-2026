@@ -17,7 +17,7 @@ import io
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, File, UploadFile
+from fastapi import APIRouter, File, Response, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy import func, select
@@ -56,6 +56,20 @@ def _build_preview(path) -> tuple[str, object, object]:
     return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii"), pil_img, geo_meta
 
 
+class StorageResponse(BaseModel):
+    used_bytes: int
+    quota_bytes: Optional[int]  # None = unlimited (USER_QUOTA_MB=0)
+    asset_count: int
+
+
+async def _usage(db, user_id: str) -> tuple[int, int]:
+    used, count = (await db.execute(
+        select(func.coalesce(func.sum(ImageRecord.size_bytes), 0), func.count(ImageRecord.id))
+        .where(ImageRecord.user_id == user_id)
+    )).one()
+    return int(used), int(count)
+
+
 @router.post("/upload", response_model=UploadResponse,
              responses={400: {"model": ErrorResponse}, 401: {"model": ErrorResponse},
                         413: {"model": ErrorResponse}, 500: {"model": ErrorResponse}})
@@ -64,9 +78,8 @@ async def upload_file(user: CurrentUser, db: DbSession, file: UploadFile = File(
     # Per-user storage quota (API v2.3.0): what is left after this user's existing uploads
     quota_left = None
     if settings.user_quota_mb > 0:
-        used = (await db.execute(select(func.coalesce(func.sum(ImageRecord.size_bytes), 0))
-                                 .where(ImageRecord.user_id == user.id))).scalar_one()
-        quota_left = settings.user_quota_mb * 1024 * 1024 - int(used)
+        used, _ = await _usage(db, user.id)
+        quota_left = settings.user_quota_mb * 1024 * 1024 - used
         if quota_left <= 0:
             raise ApiError(413, "QUOTA_EXCEEDED",
                            f"Your storage quota of {settings.user_quota_mb} MB is full.")
@@ -156,3 +169,25 @@ async def get_asset_preview(asset_id: str, user: CurrentUser, db: DbSession) -> 
         raise ApiError(404, "NOT_FOUND", "No preview available for this image.") from exc
     return FileResponse(path=str(preview), media_type="image/png",
                         headers={"Cache-Control": "private, max-age=86400"})
+
+
+@router.delete("/assets/{asset_id}", status_code=204, responses={404: {"model": ErrorResponse}})
+async def delete_asset(asset_id: str, user: CurrentUser, db: DbSession) -> Response:
+    """Delete an owned asset: file, cached preview and row (API_CONTRACT v2.3.0). History keeps the id."""
+    row, path = await resolve_owned_asset(db, user.id, asset_id)
+    await db.delete(row)
+    await db.commit()
+    for f in (path, path.with_name(f"{path.stem}.preview.png")):
+        try:
+            f.unlink(missing_ok=True)
+        except OSError as exc:  # e.g. file open on Windows; the row is gone, so it is unreachable anyway
+            logger.warning("Could not remove %s for deleted asset %s: %s", f.name, asset_id, exc)
+    logger.info("User %s deleted asset %s", user.id, asset_id)
+    return Response(status_code=204)
+
+
+@router.get("/storage", response_model=StorageResponse)
+async def storage_usage(user: CurrentUser, db: DbSession) -> StorageResponse:
+    used, count = await _usage(db, user.id)
+    quota = settings.user_quota_mb * 1024 * 1024 if settings.user_quota_mb > 0 else None
+    return StorageResponse(used_bytes=used, quota_bytes=quota, asset_count=count)

@@ -284,10 +284,10 @@ def _decode_image(url_or_base64: str) -> Tuple[Image.Image, Optional[GeoMetadata
         except UnsafeUrlError as exc:
             raise QueryValidationError(code="UNSUPPORTED_FORMAT", message=str(exc)) from exc
         except Exception as exc:
+            logger.warning("Image download failed: %s", exc)  # details stay server-side
             raise QueryValidationError(
                 code="UNSUPPORTED_FORMAT",
                 message="Failed to download the image from the URL.",
-                detail=str(exc),
             ) from exc
         return _decode_bytes(image_bytes)
 

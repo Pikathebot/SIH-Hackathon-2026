@@ -299,3 +299,72 @@ def test_quota_is_per_user(monkeypatch):
     with TestClient(app, headers=a) as ca, TestClient(app, headers=b) as cb:
         assert ca.post("/api/v1/upload", files={"file": ("a.png", data, "image/png")}).status_code == 200
         assert cb.post("/api/v1/upload", files={"file": ("b.png", data, "image/png")}).status_code == 200
+
+
+def test_auth_limits_are_per_endpoint(sync_client, rate_limits):
+    body = {"email": "nobody@example.com", "password": "wrong-password-123"}
+    for _ in range(3):
+        sync_client.post("/api/v1/auth/login", json=body)
+    assert sync_client.post("/api/v1/auth/login", json=body).status_code == 429
+    # refresh has its own budget: no cookie -> 401, not 429
+    assert sync_client.post("/api/v1/auth/refresh").status_code == 401
+
+
+# ── Asset deletion and storage usage ────────────────────────────────────
+def test_storage_usage_and_delete_frees_quota(authed_client, monkeypatch):
+    monkeypatch.setattr(settings, "user_quota_mb", 1)
+    data = _png_bytes((420, 420), noise=True)
+    empty = authed_client.get("/api/v1/storage").json()
+    assert empty == {"used_bytes": 0, "quota_bytes": 1024 * 1024, "asset_count": 0}
+
+    aid = authed_client.post("/api/v1/upload", files={"file": ("a.png", data, "image/png")}).json()["asset_id"]
+    assert authed_client.get(f"/api/v1/assets/{aid}/preview").status_code == 200  # creates cached preview
+    used = authed_client.get("/api/v1/storage").json()
+    assert used["used_bytes"] == len(data) and used["asset_count"] == 1
+    assert authed_client.post("/api/v1/upload", files={"file": ("b.png", data, "image/png")}).status_code == 413
+
+    assert authed_client.delete(f"/api/v1/assets/{aid}").status_code == 204
+    assert authed_client.get(f"/api/v1/assets/{aid}").status_code == 404
+    assert authed_client.get(f"/api/v1/assets/{aid}/preview").status_code == 404
+    assert authed_client.get("/api/v1/storage").json()["used_bytes"] == 0
+    assert authed_client.post("/api/v1/upload", files={"file": ("b.png", data, "image/png")}).status_code == 200
+
+
+def test_delete_asset_removes_files_and_is_owner_only(monkeypatch):
+    from app.config import DATA_DIR
+
+    with TestClient(app) as anon:
+        a, _ = register_user(anon)
+        b, _ = register_user(anon)
+    with TestClient(app, headers=a) as ca, TestClient(app, headers=b) as cb:
+        aid = ca.post("/api/v1/upload", files={"file": ("a.png", _png_bytes(), "image/png")}).json()["asset_id"]
+        ca.get(f"/api/v1/assets/{aid}/preview")
+        files = list((DATA_DIR / "uploads").rglob(f"{aid}*"))
+        assert len(files) == 2  # original + cached preview
+        assert cb.delete(f"/api/v1/assets/{aid}").status_code == 404  # B cannot delete A's asset
+        assert ca.get(f"/api/v1/assets/{aid}").status_code == 200
+        assert ca.delete(f"/api/v1/assets/{aid}").status_code == 204
+        assert not any(f.exists() for f in files)
+        assert ca.delete(f"/api/v1/assets/{aid}").status_code == 404
+
+
+def test_history_survives_deleted_asset(authed_client):
+    aid = authed_client.post("/api/v1/upload", files={"file": ("a.png", _png_bytes(), "image/png")}).json()["asset_id"]
+    sid = authed_client.post("/api/v1/sessions", json={"title": "t"}).json()["id"]
+    res = authed_client.post("/api/v1/query", json={"query": "What is in this image?", "session_id": sid,
+                                                   "images": [{"id": "img1", "modality": "optical", "asset_id": aid}]})
+    assert res.status_code == 200
+    assert authed_client.delete(f"/api/v1/assets/{aid}").status_code == 204
+    hist = authed_client.get(f"/api/v1/sessions/{sid}/queries")
+    assert hist.status_code == 200 and hist.json()[0]["images"][0]["asset_id"] == aid
+
+
+def test_url_download_failure_has_no_detail(authed_client, monkeypatch):
+    def fail(*_a, **_k):
+        raise ConnectionError("getaddrinfo failed for internal-host.corp:443")
+
+    monkeypatch.setattr("app.image_sources.fetch_public_url", fail)
+    body = {"query": "What is this?", "images": [{"id": "i", "modality": "optical",
+                                                  "url_or_base64": "https://example.com/a.png"}]}
+    res = authed_client.post("/api/v1/query", json=body)
+    assert res.status_code == 400 and "internal-host" not in res.text

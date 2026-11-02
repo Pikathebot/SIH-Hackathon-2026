@@ -83,7 +83,8 @@ def _client_ip(request: Request) -> str:
 
 
 async def _auth_limit(request: Request) -> None:
-    _check("auth", _client_ip(request), settings.rate_limit_auth)
+    # One bucket per endpoint, so failed logins never lock a user out of token refresh
+    _check(f"auth{request.url.path}", _client_ip(request), settings.rate_limit_auth)
 
 
 async def _query_limit(user: CurrentUser) -> None:
