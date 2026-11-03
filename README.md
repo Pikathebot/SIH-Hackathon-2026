@@ -240,7 +240,7 @@ Pre-configured sample rasters are provided in [`sample_data/`](sample_data/READM
 | :--- | :--- | :--- | :--- |
 | **Real Sentinel-2 L2A** | `sample_data/optical/real_sentinel2_austria_tci.tif` | *"Describe the land cover, forests, and terrain characteristics in this satellite image."* | Scene Captioning `[CAP]` |
 | **Coastline & Shorelines** | Sentinel-2 `.SAFE` or `optical_sentinel2_lake.jp2` | *"Detect coastal lines and highlight the water bodies in this image."* | Segmentation Mask `[SEG]` |
-| **Optical Grounding** | `sample_data/optical/optical_airbase_runway.tif` | *"Where are the aircraft parked on the apron?"* | Bounding Box `[VG]` |
+| **Optical Grounding** | `sample_data/optical/naip_airbase_davis_monthan.tif` (real 0.3 m NAIP) | *"Locate all aircraft."* | Bounding Box `[VG]` |
 | **Single SAR Radar** | `sample_data/sar/real_sentinel1_sar_grd_vv.tif` | *"Analyze the radar backscatter intensity and identify high-reflectance metallic objects."* | Radar VQA `[VQA]` |
 | **Bi-Temporal Change** | `real_sentinel2_change_t1_2022.tif` + `real_sentinel2_change_t2_2024.tif` | *"What changed between these two dates, and where did vegetation change occur?"* | Change Analysis `[CCD]` + Slider |
 | **Optical + SAR Fusion** | `cloudy_optical_scene.tif` + `penetrating_sar_scene.tif` | *"Use the optical and SAR images together to detect maritime vessels hidden under cloud cover."* | Cross-Modal Fusion `[FUSION]` |

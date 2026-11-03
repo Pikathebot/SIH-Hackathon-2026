@@ -19,17 +19,21 @@ This directory contains pre-configured, georeferenced satellite rasters in **Geo
 - **Recommended Test Queries**:
   - *"Segment and highlight the water body in this satellite image."* -> *Triggers Water Segmentation [SEG].*
 
-### `optical_port_rotterdam.tif`
-- **Format / Sensor**: 3-band True Color GeoTIFF (EPSG:4326 WGS84, 512x512, 16-bit).
-- **Features**: Container harbor, deep water channel, quay, container cargo ships, gantry cranes, warehouses.
+### `naip_port_long_beach.tif` ⭐ *Real Aerial Data*
+- **Format / Sensor**: USDA NAIP 0.6 m RGB (2022-05-11), 1024x1024 GeoTIFF, `EPSG:26911` (UTM 11N). Public domain.
+- **Features**: Port of Long Beach container terminal: one berthed container ship, four gantry cranes, container stacks, open water.
 - **Recommended Test Queries**:
-  - *"Detect all shipping vessels, cargo ships, and container cranes in this harbor."* -> *Triggers Object Detection [DET] with bounding boxes.*
+  - *"Locate the ship and the gantry cranes."* -> *Object Detection [DET]: 1 ship + 4 cranes.*
+  - *"Is there a ship berthed at the terminal?"* -> *VQA: yes, with evidence.*
 
-### `optical_airbase_runway.tif`
-- **Format / Sensor**: 3-band GeoTIFF (EPSG:4326, 512x512).
-- **Features**: Desert base, dark asphalt runway with markings, taxiway, tarmac apron with 4 parked aircraft, hangars.
+### `naip_airbase_davis_monthan.tif` ⭐ *Real Aerial Data*
+- **Format / Sensor**: USDA NAIP 0.3 m RGB (2023-10-15), 1024x1024 GeoTIFF, `EPSG:26912` (UTM 12N). Public domain.
+- **Features**: Davis-Monthan AFB aircraft storage yard (Tucson, AZ): 13 clearly visible parked aircraft, airframe parts, storage lots.
 - **Recommended Test Queries**:
-  - *"Detect all aircraft, airplanes, and jets parked on the apron."* -> *Triggers Object Detection [DET].*
+  - *"Locate all aircraft."* -> *Object Detection [DET]: 13 boxes.*
+- Avoid asking for counts in free text ("How many…?"); counting is unreliable, so count the boxes instead.
+
+Both NAIP chips are cut by `scripts/fetch_naip_chips.py` (Microsoft Planetary Computer, only the window is downloaded).
 
 ---
 
@@ -41,8 +45,8 @@ This directory contains pre-configured, georeferenced satellite rasters in **Geo
 - **Recommended Test Queries**:
   - *"Analyze the radar backscatter intensity and identify high-reflectance metallic or urban objects."* -> *Triggers SAR Single-Image VQA.*
 
-### `sar_port_rotterdam.tif`
-- **Format / Sensor**: 1-band Calibrated SAR Backscatter GeoTIFF (EPSG:4326, 512x512, 16-bit).
+### `sar_port_rotterdam.tif` *(synthetic)*
+- **Format / Sensor**: 1-band SAR-like GeoTIFF (EPSG:4326, 512x512, 16-bit). Rendered, not a real acquisition.
 - **Features**: Specular low-backscatter dark water, intense double-bounce corner reflection on metal ships/cranes.
 
 ---

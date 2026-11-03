@@ -55,13 +55,14 @@ Re-open **Scene Description**, replace the question with **"Is there a river in 
 Expected: a direct **"No, …"** with a reason.
 > "Same image, different intent: a yes/no question goes to question answering, not to segmentation."
 
-### Step 4 — Counting (≈2 s)
-**Object Counting & Question Answering** ("How many ships are in the harbour?").
-Expected: **two** ships, with a short bulleted evidence list.
+### Step 4 — Question answering on a real port (≈1 s)
+**Visual Question Answering** ("Is there a ship berthed at the terminal?"), on a real 0.6 m NAIP image of the Port of Long Beach.
+Expected: **"Yes"**, with evidence: the vessel alongside the quay and the gantry crane over it.
 
 ### Step 5 — Localization with map coordinates (≈2 s)
-**Object & Facility Localization** ("Locate all ships in the harbour.").
-Expected: **2 boxes**, one on each ship.
+**Object & Facility Localization** ("Locate all aircraft."), on a real 0.3 m NAIP image of the Davis-Monthan aircraft storage yard.
+Expected: **13 boxes**, one on each clearly visible aircraft (the small airframe parts near the bottom are not boxed).
+- Optional: re-run the VQA preset's port image with **"Locate the ship and the gantry cranes."**: 1 ship + 4 cranes.
 - Toggle **Boxes** off and on.
 - Click **GeoJSON**: each box exported as a WGS84 polygon, ready for QGIS.
 
@@ -97,7 +98,7 @@ Expected: a warning explains the supported combinations and **Analyze is disable
 
 | Avoid | Why |
 |---|---|
-| The airbase sample (`optical_airbase_runway.tif`) | It contains no aircraft; Qwen still draws a box on empty ground. |
+| Asking for **counts** ("How many aircraft…?") | Counting in free text is unreliable (it says 11, then 14, for 13 aircraft; 3 cranes for 4). Use **Locate…** and count the boxes. |
 | The `real_sentinel2_change_*` pair | It is open sea; the honest answer is "no concrete changes". |
 | Radar questions on `real_sentinel1_sar_grd_vv.tif` as a highlight | At this resolution the model correctly says it cannot identify targets: honest, but not impressive. |
 | Opening LM Studio, ComfyUI or a game mid-demo | Out of GPU memory → failed queries. |

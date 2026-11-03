@@ -17,7 +17,8 @@ DST = ROOT / "frontend" / "public" / "samples"
 # Keep in sync with DEMO_PRESETS in frontend/src/components/DemoPresetSelector.tsx
 FILES = [
     "optical/real_sentinel2_austria_tci.tif",
-    "optical/optical_port_rotterdam.tif",
+    "optical/naip_port_long_beach.tif",
+    "optical/naip_airbase_davis_monthan.tif",
     "optical/optical_sentinel2_lake.jp2",
     "bitemporal_change/urban_expansion_t1_2021.tif",
     "bitemporal_change/urban_expansion_t2_2024.tif",
