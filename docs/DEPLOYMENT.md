@@ -52,7 +52,7 @@
    ```
    Add Caddy (and Postgres) as services in a `docker-compose.prod.yml` override. **Remove the backend's `ports:` mapping** there, so only Caddy is reachable from outside. The backend trusts `X-Forwarded-For` (`FORWARDED_ALLOW_IPS="*"`), which is safe only while nothing but nginx can reach it.
 4. `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build`
-5. **Gate traffic on readiness:** `GET /api/v1/ready` returns 503 until the DB answers and the engine is loaded. The first start downloads SigLIP (~1.7 GB) and can take a few minutes. Liveness is `GET /api/v1/health`.
+5. **Gate traffic on readiness:** `GET /api/v1/ready` returns 503 until the DB answers and the engine is configured. RSUniVLM loads lazily: the first mask query downloads SigLIP (~3.3 GB) unless the Hugging Face cache volume is pre-filled, so send one warm-up segmentation query (or copy a cache into the volume) before taking traffic. Liveness is `GET /api/v1/health`.
 
 ## 4. Operations
 

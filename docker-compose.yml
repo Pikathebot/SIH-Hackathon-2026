@@ -7,7 +7,7 @@
 # Mounted from the host, never baked into images:
 #   tools/models/                        Qwen3-VL GGUF + mmproj for llama-server  (VLM_MODELS_DIR)
 #   ai_service/rsunivlm/checkpoints/     RSUniVLM weights (+ optional lora_adapter)
-# Named volumes: satquery-data (DB, uploads, evidence), hf-cache (SigLIP vision tower, ~1.7 GB on first start).
+# Named volumes: satquery-data (DB, uploads, evidence), hf-cache (SigLIP vision tower, ~3.3 GB, downloaded on the first mask query).
 # Set HF_CACHE_DIR to a host path (e.g. C:/Users/<you>/.cache/huggingface) to reuse an existing cache.
 #
 # VRAM: llama-server + RSUniVLM peak at ~11.8 GB on a 12 GB card. Close other GPU apps first.

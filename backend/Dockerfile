@@ -15,7 +15,8 @@ ARG PYTHON_VERSION=3.11
 FROM python:${PYTHON_VERSION}-slim-bookworm AS builder
 ARG FLAVOR=gpu
 COPY --from=ghcr.io/astral-sh/uv:0.11.19 /uv /usr/local/bin/uv
-ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never
+ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never \
+    UV_HTTP_TIMEOUT=300 UV_CONCURRENT_DOWNLOADS=4
 WORKDIR /build
 COPY requirements.lock ./requirements.lock
 COPY backend/requirements.lock ./backend.lock

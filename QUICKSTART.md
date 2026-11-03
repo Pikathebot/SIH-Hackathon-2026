@@ -42,7 +42,7 @@ cd frontend; npm ci; cd ..
 | Qwen3-VL-8B GGUF + mmproj | `tools/models/Qwen3VL-8B-Instruct-Q4_K_M.gguf`, `tools/models/mmproj-Qwen3VL-8B-Instruct-Q8_0.gguf` | [Qwen/Qwen3-VL-8B-Instruct-GGUF](https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct-GGUF) |
 | RSUniVLM weights | `ai_service/rsunivlm/checkpoints/RSUniVLM/` | [liux-cyber/RSUniVLM](https://huggingface.co/liux-cyber/RSUniVLM) |
 
-The SigLIP vision tower (`google/siglip-so400m-patch14-384`, ~1.7 GB) downloads into the Hugging Face cache on first real start.
+The SigLIP vision tower (`google/siglip-so400m-patch14-384`, ~3.3 GB) downloads into the Hugging Face cache the first time RSUniVLM is needed (the first segmentation/mask query). On a slow link that query can take 10+ minutes and return 504 while the download continues.
 
 ---
 
@@ -72,7 +72,7 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build    # h
 ```
 - **GPU containers need Docker Desktop's WSL 2 engine** (Settings → General → *Use the WSL 2 based engine*). The Hyper-V engine has no GPU passthrough. It also caps the VM at 2 GB of RAM, which is too little to load RSUniVLM. Check with `docker run --rm --gpus all busybox true`.
 - The backend is published on `127.0.0.1:8000` only. Browsers go through nginx on :3000.
-- Data lives in the `satquery_satquery-data` volume, separate from the native `backend/data/`. To reuse your existing Hugging Face cache, set `HF_CACHE_DIR=C:/Users/<you>/.cache/huggingface` in `.env`.
+- Data lives in the `satquery_satquery-data` volume, separate from the native `backend/data/`. To reuse your existing Hugging Face cache, set `HF_CACHE_DIR=C:/Users/<you>/.cache/huggingface` in `.env`. Without it the container downloads SigLIP (~3.3 GB) again on its first mask query.
 
 ---
 
