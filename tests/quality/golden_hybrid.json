@@ -1,0 +1,237 @@
+{
+ "recorded": "2026-11-04 20:10",
+ "engine": {
+  "engine": "hybrid",
+  "mode": "real",
+  "notes": [],
+  "vlm_server": "http://127.0.0.1:8080",
+  "vlm_model": "qwen3-vl-8b",
+  "vlm_available": true
+ },
+ "scenarios": {
+  "airbase_locate": {
+   "status": 200,
+   "wall_s": 5.65,
+   "task": "detection",
+   "tool": "qwen_vl_vg",
+   "confidence": 0.9,
+   "answer": "Detection completed with 13 region(s) found.",
+   "evidence": "bbox",
+   "boxes": [
+    [
+     440,
+     402,
+     486,
+     457
+    ],
+    [
+     451,
+     156,
+     508,
+     210
+    ],
+    [
+     515,
+     161,
+     566,
+     214
+    ],
+    [
+     569,
+     171,
+     658,
+     243
+    ],
+    [
+     662,
+     171,
+     744,
+     247
+    ],
+    [
+     756,
+     171,
+     839,
+     247
+    ],
+    [
+     853,
+     171,
+     955,
+     247
+    ],
+    [
+     708,
+     19,
+     765,
+     74
+    ],
+    [
+     768,
+     10,
+     808,
+     65
+    ],
+    [
+     892,
+     14,
+     949,
+     69
+    ],
+    [
+     436,
+     634,
+     468,
+     683
+    ],
+    [
+     468,
+     637,
+     505,
+     686
+    ],
+    [
+     550,
+     637,
+     581,
+     692
+    ]
+   ],
+   "image_size": [
+    1024,
+    1024
+   ],
+   "mask_frac": null
+  },
+  "port_locate": {
+   "status": 200,
+   "wall_s": 2.74,
+   "task": "detection",
+   "tool": "qwen_vl_vg",
+   "confidence": 0.91,
+   "answer": "Detection completed with 5 region(s) found.",
+   "evidence": "bbox",
+   "boxes": [
+    [
+     464,
+     710,
+     559,
+     847
+    ],
+    [
+     436,
+     843,
+     726,
+     886
+    ],
+    [
+     436,
+     922,
+     726,
+     956
+    ],
+    [
+     436,
+     989,
+     726,
+     1023
+    ],
+    [
+     509,
+     478,
+     726,
+     520
+    ]
+   ],
+   "image_size": [
+    1024,
+    1024
+   ],
+   "mask_frac": null
+  },
+  "port_vqa_yes": {
+   "status": 200,
+   "wall_s": 2.04,
+   "task": "vqa",
+   "tool": "qwen_vl_vqa",
+   "confidence": 0.82,
+   "answer": "Yes, there is a ship berthed at the terminal. Evidence: - A large vessel is visible docked alongside the quay on the left side of the image. - The ship\u2019s hull and superstructure are clearly visible, and it is positioned directly next to the pier. - The ship is partially covered by the shadow of a large gantry crane, which is a common feature at container terminals for loading/unloading cargo. - The presence of the ship, along with the adjacent cranes and the container yard, confirms it is berthed at the terminal.",
+   "evidence": "none",
+   "boxes": [],
+   "image_size": null,
+   "mask_frac": null
+  },
+  "austria_vqa_no": {
+   "status": 200,
+   "wall_s": 1.97,
+   "task": "vqa",
+   "tool": "qwen_vl_vqa",
+   "confidence": 0.79,
+   "answer": "No, there is no river in this image. The scene appears to be an aerial or satellite view of a coastal or polar region, likely featuring sea ice or glaciers. The dark, textured areas are consistent with water or ice, while the lighter, irregular shapes are characteristic of ice floes or glacier surfaces. There are no linear, flowing features that would indicate a river. The bright, curved feature in the lower right may be a small area of open water or ice melt, but it does not form a river. Ground truth: No river is visible.",
+   "evidence": "none",
+   "boxes": [],
+   "image_size": null,
+   "mask_frac": null
+  },
+  "austria_caption": {
+   "status": 200,
+   "wall_s": 1.55,
+   "task": "captioning",
+   "tool": "qwen_vl_cap",
+   "confidence": 0.75,
+   "answer": "This remote-sensing scene depicts a coastal or nearshore environment dominated by water and ice. The dark, textured areas suggest open water or sea ice with varying surface roughness, while the lighter, more reflective regions indicate ice floes or snow-covered surfaces. A bright, curved feature in the lower right appears to be a shoreline or ice edge illuminated by sunlight, possibly with a small built-up area visible at the very bottom right corner. There is no discernible vegetation or significant terrain features, and no infrastructure or notable objects are clearly identifiable beyond the ice-water interface. The scene is consistent with a polar or high-latitude coastal zone during daylight hours.",
+   "evidence": "none",
+   "boxes": [],
+   "image_size": null,
+   "mask_frac": null
+  },
+  "lake_segment": {
+   "status": 200,
+   "wall_s": 16.46,
+   "task": "detection",
+   "tool": "rsunivlm_seg",
+   "confidence": 0.96,
+   "answer": "Segmentation mask generated successfully.",
+   "evidence": "mask",
+   "boxes": [],
+   "image_size": null,
+   "mask_frac": 0.3500022888183594
+  },
+  "urban_change": {
+   "status": 200,
+   "wall_s": 3.14,
+   "task": "change_detection",
+   "tool": "qwen_vl_ccd",
+   "confidence": 0.82,
+   "answer": "Between the two images, new construction occurred in the lower right quadrant, specifically within the area bounded by the blue diagonal line and the vertical dark brown line. Concrete changes: - A new, light-gray rectangular building with three distinct internal sections (white, blue, and red) was constructed in the lower right. This structure is absent in the first image. - To the right of the blue diagonal line, a new gray rectangular structure with a 3x3 grid of red squares was added. This is also absent in the first image. - The vertical dark brown line, which appears to be a road or utility corridor, was extended downward into the lower right quadrant, intersecting the new construction area. No other changes are evident. The upper left structure and the yellow blocks remain unchanged.",
+   "evidence": "mask",
+   "boxes": [],
+   "image_size": null,
+   "mask_frac": 0.2915802001953125
+  },
+  "sea_change_none": {
+   "status": 200,
+   "wall_s": 4.41,
+   "task": "change_detection",
+   "tool": "qwen_vl_ccd",
+   "confidence": 0.75,
+   "answer": "Based on the visual evidence, the primary change between the two images is a significant reduction in the extent of the bright, textured surface \u2014 likely water \u2014 in the upper-left quadrant. In the first image, the upper-left area is dominated by a bright, textured surface (consistent with water with surface ripples or waves) that extends diagonally across the frame. In the second image, this bright area has been replaced by a darker, smoother surface, indicating that the water has receded or been removed. Additionally, the color palette has shifted. The first image has a more pronounced blue and purple hue, while the second image has a more greenish and brownish tone, suggesting a change in surface material or lighting conditions. The change is most evident in the upper-left quadrant, where the bright, textured water feature is no longer present in the second image. The area where the water was is now covered by a darker, smoother surface, possibly land or sediment. In summary, the most concrete change is the loss of water extent in the upper-left quadrant, replaced by a darker, smoother surface.",
+   "evidence": "mask",
+   "boxes": [],
+   "image_size": null,
+   "mask_frac": 0.9484186172485352
+  },
+  "fusion_cloud_water": {
+   "status": 200,
+   "wall_s": 0.06,
+   "task": "fusion",
+   "tool": "fusion_classifier",
+   "confidence": 0.78,
+   "answer": "Multi-sensor optical-SAR fusion classified the scene into: 48.1% Built-up infrastructure, 0.3% Vegetation canopy, and 51.6% Water bodies. 43.0% of the optical image is cloud-covered; water beneath it was identified from the SAR backscatter, which is unaffected by cloud. Optical spectral indices resolved vegetation and water boundaries in clear areas, and SAR backscatter confirmed water (specular) and built-up (double-bounce) surfaces.",
+   "evidence": "mask",
+   "boxes": [],
+   "image_size": null,
+   "mask_frac": null
+  }
+ }
+}

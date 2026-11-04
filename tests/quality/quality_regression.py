@@ -155,7 +155,8 @@ def run_scenario(c: httpx.Client, name: str, sc: dict, assets: dict) -> dict:
         "status": 200, "wall_s": round(wall, 2), "task": j["task"], "tool": j["execution_summary"]["tool_used"],
         "confidence": j["confidence"], "answer": j["answer"], "evidence": ve["type"],
         "boxes": ve.get("boxes") or [], "image_size": ve.get("image_size"),
-        "mask_frac": mask_fraction(ve.get("mask_base64")) if ve["type"] == "mask" else None,
+        # Binary masks only: fusion returns a colour class map, whose "area" means nothing
+        "mask_frac": mask_fraction(ve.get("mask_base64")) if ve["type"] == "mask" and j["task"] != "fusion" else None,
     }
 
 
