@@ -61,6 +61,8 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - name: Type-check
         run: npx tsc --noEmit
+      - name: Unit tests (vitest)
+        run: npm test
       - name: Build
         run: npm run build
       - name: Audit (high and critical only)

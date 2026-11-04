@@ -373,6 +373,14 @@ export const QueryComposer: React.FC<QueryComposerProps> = ({
               )}
             </div>
 
+            {/* The drawer holds the full notice; when it is closed, still say why Analyze is blocked */}
+            {images.length > 0 && !showImageDrawer && validationWarning && (
+              <span role="status" className="flex items-center gap-1 text-amber-signal truncate">
+                <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
+                <span className="truncate">{validationWarning}</span>
+              </span>
+            )}
+
             {onOpenPresets && (
               <button
                 type="button"

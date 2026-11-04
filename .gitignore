@@ -78,3 +78,6 @@ Thumbs.db
 tools/
 # Engine evaluation reports are generated locally
 reports/
+
+# Bundled demo samples (frontend presets) are part of the app
+!frontend/public/samples/*.jp2
