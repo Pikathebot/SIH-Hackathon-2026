@@ -51,6 +51,9 @@ class Settings(BaseSettings):
     backend_port: int = Field(default=8000, alias="BACKEND_PORT")
     # JSON bodies (e.g. base64 images on /query); /upload is bounded by MAX_UPLOAD_MB instead
     max_request_mb: int = Field(default=64, alias="MAX_REQUEST_MB")
+    # Largest raster accepted, in megapixels (decompression-bomb guard); 0 = unlimited.
+    # A full Sentinel-2 tile is 120 MP; 1024 MP is 32 768 x 32 768.
+    max_image_megapixels: int = Field(default=1024, alias="MAX_IMAGE_MEGAPIXELS")
     # Total size of one user's uploads; 0 = unlimited
     user_quota_mb: int = Field(default=20480, alias="USER_QUOTA_MB")
 

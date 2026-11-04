@@ -58,7 +58,7 @@
 
 - **Backups:** the Postgres database plus the `satquery-data` volume (`uploads/`, `evidence/`). Uploads are referenced by database rows, so back them up together.
 - **Logs:** JSON lines on stdout. Every line carries `request_id`, which the user also sees under error messages and which nginx forwards as `X-Request-ID`.
-- **Limits worth tuning:** `RATE_LIMIT_AUTH`, `RATE_LIMIT_QUERY`, `GPU_QUEUE_MAX`, `GPU_TASK_TIMEOUT_S`, `MAX_REQUEST_MB`, `MAX_UPLOAD_MB`, `USER_QUOTA_MB`. See `.env.example` and `API_CONTRACT.md` §6.
+- **Limits worth tuning:** `RATE_LIMIT_AUTH`, `RATE_LIMIT_QUERY`, `GPU_QUEUE_MAX`, `GPU_TASK_TIMEOUT_S`, `MAX_REQUEST_MB`, `MAX_UPLOAD_MB`, `MAX_IMAGE_MEGAPIXELS`, `USER_QUOTA_MB`. See `.env.example` and `API_CONTRACT.md` §6.
 - **Upgrades:** rebuild the images. The locks pin every Python package, and `llama.cpp` is pinned by image tag in `docker-compose.yml`.
 
 ## 5. Not covered yet

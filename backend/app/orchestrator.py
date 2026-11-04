@@ -27,6 +27,7 @@ from app.geotiff import (
     GeoMetadata,
     is_geotiff,
     pixel_boxes_to_geo_polygons,
+    ImageTooLargeError,
     process_geotiff,
 )
 from app.tiling import run_tiled_detection
@@ -341,7 +342,10 @@ def _decode_image(url_or_base64: str) -> Tuple[Image.Image, Optional[GeoMetadata
 
 def _decode_bytes(image_bytes: bytes) -> Tuple[Image.Image, Optional[GeoMetadata]]:
     if is_geotiff(image_bytes):
-        img, geo_meta = process_geotiff(image_bytes)
+        try:
+            img, geo_meta = process_geotiff(image_bytes)
+        except ImageTooLargeError as exc:
+            raise QueryValidationError(code="UNSUPPORTED_FORMAT", message=str(exc)) from exc
         img._geo_meta = geo_meta
         return img, geo_meta
     try:

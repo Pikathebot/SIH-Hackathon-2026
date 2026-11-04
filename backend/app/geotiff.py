@@ -47,6 +47,26 @@ class GeoMetadata:
     band_resolution_warning: Optional[str] = None
 
 
+class ImageTooLargeError(ValueError):
+    """The raster's header declares more pixels than MAX_IMAGE_MEGAPIXELS allows."""
+
+
+def check_pixel_limit(width: int, height: int) -> None:
+    """Refuse decompression bombs from the header alone, before any pixel is decoded.
+
+    A ~100 KB PNG can claim 65 000 x 65 000 pixels; decimating it still costs seconds of
+    CPU per request, and every later query on the asset would pay again (tiling).
+    """
+    from app.config import settings
+
+    limit = settings.max_image_megapixels
+    if limit > 0 and width * height > limit * 1_000_000:
+        raise ImageTooLargeError(
+            f"Image is {width} x {height} pixels ({width * height / 1e6:.0f} MP); "
+            f"the limit is {limit} MP (MAX_IMAGE_MEGAPIXELS)."
+        )
+
+
 def is_geotiff(data_or_path: Union[bytes, str, Path]) -> bool:
     """Checks if raw bytes or a file path start with a valid TIFF/GeoTIFF or JPEG 2000 (JP2) header."""
     if isinstance(data_or_path, (str, Path)):
@@ -346,6 +366,7 @@ def process_geotiff(
             n_bands = src.count
             width = src.width
             height = src.height
+            check_pixel_limit(width, height)
             crs_obj = src.crs
             transform = src.transform
 
@@ -464,13 +485,15 @@ def process_geotiff(
 
             return pil_img, geo_meta
 
+    except ImageTooLargeError:
+        raise
     except Exception as e:
         logger.warning("Rasterio GeoTIFF/JP2 extraction failed: %s. Falling back to PIL.", e)
-        if isinstance(source, (str, Path)):
-            img = Image.open(source).convert("RGB")
-        else:
-            buf = io.BytesIO(source)
-            img = Image.open(buf).convert("RGB")
+        # Close the file even when decoding fails: on Windows an open handle blocks the
+        # caller from deleting a rejected upload (it then 500'd and left the file behind).
+        with Image.open(source if isinstance(source, (str, Path)) else io.BytesIO(source)) as opened:
+            check_pixel_limit(*opened.size)  # header only; nothing is decoded yet
+            img = opened.convert("RGB")
         if max(img.width, img.height) > max_dim:
             if img.width >= img.height:
                 nw = max_dim

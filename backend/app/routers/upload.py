@@ -19,12 +19,13 @@ from typing import Optional
 
 from fastapi import APIRouter, File, Response, UploadFile
 from fastapi.responses import FileResponse
+from PIL import Image
 from pydantic import BaseModel
 from sqlalchemy import func, select
 
 from app.config import DATA_DIR, UPLOADS_DIR, settings
 from app.errors import ApiError
-from app.geotiff import process_geotiff
+from app.geotiff import ImageTooLargeError, process_geotiff
 from app.image_sources import EXTENSIONS, resolve_owned_asset, sniff_image_type
 from app.models.api import ErrorResponse, GeospatialMetadata
 from app.models.db import ImageRecord, new_id
@@ -49,11 +50,26 @@ class UploadResponse(BaseModel):
     geospatial: Optional[GeospatialMetadata] = None
 
 
-def _build_preview(path) -> tuple[str, object, object]:
+def _raw_size(path, preview) -> tuple[int, int]:
+    """Full-resolution (width, height) of a non-georeferenced upload; the preview is capped at 1024 px."""
+    try:
+        import rasterio
+        with rasterio.open(path) as src:
+            return src.width, src.height
+    except Exception:
+        try:
+            with Image.open(path) as im:
+                return im.size
+        except Exception:
+            return preview.size
+
+
+def _build_preview(path) -> tuple[str, object, tuple[int, int]]:
     pil_img, geo_meta = process_geotiff(path, max_dim=1024)
     buf = io.BytesIO()
     pil_img.save(buf, format="PNG")
-    return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii"), pil_img, geo_meta
+    size = geo_meta.raw_size if geo_meta else _raw_size(path, pil_img)
+    return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii"), geo_meta, size
 
 
 class StorageResponse(BaseModel):
@@ -112,7 +128,9 @@ async def upload_file(user: CurrentUser, db: DbSession, file: UploadFile = File(
                 chunk = await file.read(_CHUNK)
 
         try:
-            preview, pil_img, geo_meta = await asyncio.to_thread(_build_preview, target)
+            preview, geo_meta, (width, height) = await asyncio.to_thread(_build_preview, target)
+        except ImageTooLargeError as exc:
+            raise ApiError(413, "PAYLOAD_TOO_LARGE", str(exc)) from exc
         except Exception as exc:
             logger.warning("Could not decode upload %s (%s): %s", asset_id, kind, exc)
             raise ApiError(400, "UNSUPPORTED_FORMAT", "The file could not be read as an image.") from exc
@@ -135,8 +153,7 @@ async def upload_file(user: CurrentUser, db: DbSession, file: UploadFile = File(
     return UploadResponse(
         asset_id=asset_id, filename=original_name, url=f"/api/v1/assets/{asset_id}",
         preview_base64=preview, format="geotiff" if geo_meta is not None else "standard",
-        width=geo_meta.raw_size[0] if geo_meta else pil_img.width,
-        height=geo_meta.raw_size[1] if geo_meta else pil_img.height,
+        width=width, height=height,
         size_bytes=total, geospatial=geospatial,
     )
 

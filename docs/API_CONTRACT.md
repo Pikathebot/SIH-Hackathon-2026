@@ -1,6 +1,6 @@
 # API_CONTRACT.md — Frontend ↔ Backend HTTP Contract
 
-**Version:** 2.4.0 (2.4.0 adds `visual_evidence.image_size`, the pixel grid `boxes` are in; see §1. 2.3.0 adds request IDs, rate limits, the GPU queue errors, `GET /ready` and per-user storage quotas; see §6. 2.2.0 adds `HistoryEntry.images`; 2.1.0 adds `GET /assets/{asset_id}/preview`; 2.0.0 made `/query`, `/upload`, `/assets` and `/preview` require authentication; see §5)
+**Version:** 2.4.1 (2.4.1 adds the `MAX_IMAGE_MEGAPIXELS` limit, a new case of the existing `413 PAYLOAD_TOO_LARGE`, and says `width`/`height` are the full-resolution size; see §5. 2.4.0 adds `visual_evidence.image_size`, the pixel grid `boxes` are in; see §1. 2.3.0 adds request IDs, rate limits, the GPU queue errors, `GET /ready` and per-user storage quotas; see §6. 2.2.0 adds `HistoryEntry.images`; 2.1.0 adds `GET /assets/{asset_id}/preview`; 2.0.0 made `/query`, `/upload`, `/assets` and `/preview` require authentication; see §5)
 **Base URL (local dev):** `http://localhost:8000`
 **Consumers:** `frontend/` (Person 4)
 **Producers:** `backend/` (Person 3)
@@ -260,7 +260,7 @@ Every endpoint requires `Authorization: Bearer <access_token>`, except `GET /hea
 
 ### Uploads and assets
 
-`POST /upload` takes `multipart/form-data` with one `file` field. Accepted types are GeoTIFF, JPEG 2000, PNG and JPEG. The type is checked from the file's magic bytes, not its extension. A file larger than `MAX_UPLOAD_MB` returns `413 PAYLOAD_TOO_LARGE`. *(v2.3.0)* An upload that would take the user's total stored uploads past `USER_QUOTA_MB` returns `413 QUOTA_EXCEEDED`. Any other type returns `400 UNSUPPORTED_FORMAT`. A successful upload returns `200`:
+`POST /upload` takes `multipart/form-data` with one `file` field. Accepted types are GeoTIFF, JPEG 2000, PNG and JPEG. The type is checked from the file's magic bytes, not its extension. A file larger than `MAX_UPLOAD_MB` returns `413 PAYLOAD_TOO_LARGE`. *(v2.3.0)* An upload that would take the user's total stored uploads past `USER_QUOTA_MB` returns `413 QUOTA_EXCEEDED`. *(v2.4.1)* An image whose header declares more than `MAX_IMAGE_MEGAPIXELS` pixels (default 1024, `0` = unlimited) returns `413 PAYLOAD_TOO_LARGE` before any pixel is decoded (decompression-bomb guard); the same image sent inline to `/query` returns `400 UNSUPPORTED_FORMAT`. Any other type returns `400 UNSUPPORTED_FORMAT`. A successful upload returns `200`; `width` and `height` are the full-resolution size, not the preview's:
 ```json
 { "asset_id": "uuid", "filename": "scene.tif", "url": "/api/v1/assets/<asset_id>",
   "preview_base64": "data:image/png;base64,...", "format": "geotiff | standard",
