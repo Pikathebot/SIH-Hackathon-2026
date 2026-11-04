@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Cookie, Response
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
 
 from app.config import settings
@@ -41,6 +41,11 @@ def _iso(dt: datetime) -> str:
 
 async def _issue_tokens(db: DbSession, user: User, response: Response) -> AuthResponse:
     raw, token_hash, expires = new_refresh_token()
+    # Every login and refresh adds a row; drop this user's expired ones so the table stays
+    # bounded. Expired tokens are refused anyway. Rotated-but-unexpired rows are kept,
+    # because presenting one again is how token theft is detected.
+    await db.execute(delete(RefreshToken).where(RefreshToken.user_id == user.id,
+                                                RefreshToken.expires_at <= utc_now()))
     db.add(RefreshToken(user_id=user.id, token_hash=token_hash, expires_at=_iso(expires)))
     await db.commit()
     response.set_cookie(

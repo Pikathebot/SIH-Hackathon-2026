@@ -130,3 +130,37 @@ def test_logout_revokes_refresh_token():
         with TestClient(app) as again:
             again.cookies.set(REFRESH_COOKIE, cookie, path="/api/v1/auth")
             assert again.post("/api/v1/auth/refresh").status_code == 401
+
+
+def _token_rows(user_id: str) -> list[tuple[str, str | None]]:
+    import asyncio
+
+    from sqlalchemy import select
+
+    from app.database import SessionLocal
+    from app.models.db import RefreshToken
+
+    async def q():
+        async with SessionLocal() as db:
+            rows = (await db.execute(select(RefreshToken).where(RefreshToken.user_id == user_id))).scalars()
+            return [(r.expires_at, r.revoked_at) for r in rows]
+    return asyncio.run(q())
+
+
+def test_expired_refresh_tokens_are_pruned_but_rotated_ones_kept(monkeypatch):
+    """Refresh tokens must not pile up forever (one row per login/refresh, found by the soak test)."""
+    import app.routers.auth as auth_mod
+
+    with TestClient(app) as c:
+        _, body = register_user(c)
+        uid = body["user"]["id"]
+        for _ in range(5):
+            assert c.post("/api/v1/auth/refresh").status_code == 200
+        rows = _token_rows(uid)
+        assert len(rows) == 6 and sum(r is None for _, r in rows) == 1  # 5 rotated (kept for reuse detection) + live
+
+        # Jump past every existing expiry: the next issue prunes them all except the new one
+        future = "9999-01-01T00:00:00.000000Z"
+        monkeypatch.setattr(auth_mod, "utc_now", lambda: future)
+        assert c.post("/api/v1/auth/login", json={"email": body["user"]["email"], "password": TEST_PASSWORD}).status_code == 200
+        assert len(_token_rows(uid)) == 1

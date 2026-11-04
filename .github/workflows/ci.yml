@@ -44,7 +44,7 @@ jobs:
         run: >
           python -m pytest -q
           ai_service/common ai_service/rsunivlm/tests ai_service/fusion/tests ai_service/qwen_vl/tests
-          backend/tests
+          backend/tests tests/test_tooling.py
 
   frontend:
     runs-on: ubuntu-latest
@@ -88,6 +88,8 @@ jobs:
           curl -fsS http://127.0.0.1:8000/api/v1/ready
           curl -fsS http://127.0.0.1:3000/ | grep -q '<div id="root"'
           curl -fsS http://127.0.0.1:3000/api/v1/health
+      - name: Live e2e on the CPU stack (mock engine, through nginx)
+        run: python3 -m pip install -q httpx && python3 tests/e2e/e2e_live.py --base http://127.0.0.1:3000 --mock --timeout 120
       - name: Compose logs on failure
         if: failure()
         run: docker compose -f docker-compose.yml -f docker-compose.cpu.yml logs --no-color

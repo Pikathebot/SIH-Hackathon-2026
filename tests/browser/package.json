@@ -1,0 +1,13 @@
+{
+  "name": "satquery-browser-tests",
+  "private": true,
+  "type": "module",
+  "description": "Headless-Chrome rehearsal of docs/DEMO_SCRIPT.md against a running stack",
+  "scripts": {
+    "rehearse": "node demo_rehearsal.mjs",
+    "rehearse:mock": "node demo_rehearsal.mjs --mock"
+  },
+  "devDependencies": {
+    "puppeteer-core": "23.11.1"
+  }
+}
